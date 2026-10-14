@@ -147,3 +147,13 @@ test('a useful SearXNG response avoids an unnecessary second request', async () 
   assert.equal(count, 1);
   assert.equal(result.sources.length, 4);
 });
+
+test('HTTPS Reader unwraps anonymous SearXNG JSON without forwarding any secrets', async () => {
+  const result = await searchProduct('测试产品', {}, { SEARXNG_URL: 'https://r.jina.ai/http://search.example/search' }, async (url, init) => {
+    assert.equal(new URL(String(url)).hostname, 'r.jina.ai');
+    assert.ok(!(init?.headers as Record<string,string>).Authorization);
+    return ok({code:200, data:{content:JSON.stringify({results:rows})}});
+  });
+  assert.equal(result.sources.length, 2);
+  assert.equal(result.sources[0].title, '产品官方资料');
+});

@@ -122,10 +122,17 @@ export async function searchProduct(product: string, settings: Settings, env: En
         try { url = new URL(provider.endpoint); } catch { throw new AppError('SEARCH_CONFIG_INVALID', '服务端搜索地址格式不正确。', 503); }
         const format = url.searchParams.get('format') === 'html' ? 'html' : 'json';
         url.searchParams.set('q', query); url.searchParams.set('format', format); url.searchParams.set('language', 'zh-CN'); url.searchParams.set('categories', 'general');
-        const request = { headers: { Accept: format === 'html' ? 'text/html' : 'application/json', 'User-Agent': 'IQTaxConsumerAssistant/1.0' } };
+        const viaReader = url.hostname === 'r.jina.ai';
+        const request = { headers: { Accept: format === 'html' ? 'text/html' : 'application/json', 'User-Agent': 'IQTaxConsumerAssistant/1.0', ...(viaReader ? { 'X-Timeout': '15' } : {}) } };
         data = format === 'html'
           ? { results: parseSearxHTML(await requestText(url.href, request, fetcher, 'SearXNG 搜索', 12000)) }
-          : await requestJson(url.href, request, fetcher, 'SearXNG 搜索', 12000);
+          : await requestJson(url.href, request, fetcher, 'SearXNG 搜索', viaReader ? 20000 : 12000);
+        if (viaReader) {
+          const content = data?.data?.content;
+          if (typeof content !== 'string') throw new AppError('SEARCH_FORMAT', '搜索读取服务没有返回有效的搜索内容。');
+          try { data = JSON.parse(content.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')); }
+          catch { throw new AppError('SEARCH_FORMAT', '搜索读取服务返回内容无法解析。'); }
+        }
       }
       if (!data || !Array.isArray(data.results)) throw new AppError('SEARCH_FORMAT', `${provider.kind} 搜索没有返回有效结果，请重试或更换搜索服务。`);
       responses.push({ status: 'fulfilled', value: data.results.slice(0, 12) });

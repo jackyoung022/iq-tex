@@ -88,6 +88,8 @@ npm start
 
 设置弹窗中的“测试联网搜索”通过 `POST /api/search` 实际检索当前产品，不调用 LLM、无需模型 API Key。Tavily 的密钥错误与 SearXNG 的云端访问拒绝分别显示。
 
-当前云端默认使用公共 HTTPS SearXNG 实例，不依赖本机的 HTTP 非标准端口；本地开发仍可使用自建服务。公共实例会收到产品检索词，并可能限流或暂时不可用；可替换为自己的 HTTPS 实例，或填写 Tavily Key。
+当前云端通过 Jina Reader 的 HTTPS 读取接口获取现有匿名 SearXNG 的结果，避免云端直接连接 HTTP 非标准端口的问题；本地开发仍可直接使用自建服务。搜索服务和 Reader 会收到产品检索词，不转发模型密钥；两者可能限流或暂时不可用。可替换为自己的 HTTPS SearXNG 实例，或填写 Tavily Key。
 
 SearXNG 地址可附带 `?format=html`，读取公开搜索结果卡片；默认仍为 JSON。只提取结果标题、链接和摘要，不执行页面脚本，遇到拒绝或验证页面不会尝试绕过。
+
+Reader 格式为 `https://r.jina.ai/http://你的公开匿名SearXNG/search`；只用于无需凭据的公开搜索地址，不应把含密钥或私有服务的地址发送给 Reader。
