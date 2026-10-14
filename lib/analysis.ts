@@ -38,6 +38,20 @@ export function cleanSources(rows: unknown[]): Source[] {
   return sources;
 }
 
+export function relevantSources(product: string, sources: Source[]): Source[] {
+  const normalized = product.toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]/g, '');
+  const terms = new Set(product.toLowerCase().match(/[a-z]{3,}/g) || []);
+  for (const group of product.match(/[\u3400-\u9fff]{2,}/g) || []) {
+    for (let i = 0; i < group.length - 1; i++) terms.add(group.slice(i, i + 2));
+  }
+  // A successful HTTP request can still return irrelevant or stale engine results.
+  // Keep only snippets mentioning the product or a meaningful part of its name.
+  return sources.filter(source => {
+    const text = `${source.title} ${source.content}`.toLowerCase();
+    return (normalized.length >= 2 && text.replace(/[^a-z0-9\u3400-\u9fff]/g, '').includes(normalized)) || [...terms].some(term => text.includes(term));
+  }).map((source, index) => ({ ...source, id: index + 1 }));
+}
+
 async function requestJson(url: string, init: RequestInit, fetcher: Fetcher, service: string, timeout = 25000) {
   let response: Response;
   try { response = await fetcher(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(timeout) }); }
@@ -99,7 +113,7 @@ export async function searchProduct(product: string, settings: Settings, env: En
       return data.results.slice(0, 8);
     }));
     const successful = responses.filter((r): r is PromiseFulfilledResult<unknown[]> => r.status === 'fulfilled');
-    const sources = cleanSources(successful.flatMap(r => r.value));
+    const sources = relevantSources(product, cleanSources(successful.flatMap(r => r.value)));
     if (sources.length) return { sources, provider: provider.kind, warnings: [...warnings, ...(successful.length < queries.length ? ['部分检索请求失败，本次仅使用已返回的信息。'] : [])] };
     if (successful.length) emptyResult = { sources: [], provider: provider.kind, warnings: [...warnings] };
     const rejected = responses.find((r): r is PromiseRejectedResult => r.status === 'rejected');

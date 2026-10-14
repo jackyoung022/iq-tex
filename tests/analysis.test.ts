@@ -120,3 +120,11 @@ test('Tavily alone explains the correct credential and HTML is never treated as 
   await assert.rejects(searchProduct('测试产品', { tavilyKey: 'invalid' }, {}, async () => new Response('', { status: 401 })), /Tavily 搜索密钥/);
   await assert.rejects(searchProduct('测试产品', {}, env, async () => ok({ message: 'blocked' })), /没有返回有效结果/);
 });
+
+test('unrelated engine results trigger backup instead of being passed to the model', async () => {
+  const result = await searchProduct('戴森吹风机', {}, { ...env, SEARXNG_FALLBACK_URLS: 'https://backup.example/search' }, async url => ok({ results: String(url).includes('backup.example') ? [{ title: '戴森吹风机官方资料', url: 'https://dyson.example/product', content: '戴森吹风机的参数与定价。' }] : [{ title: 'LinkedIn Login', url: 'https://linkedin.example', content: 'Sign in to LinkedIn.' }] }));
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0].id, 1);
+  assert.ok(result.sources[0].title.includes('戴森'));
+  assert.equal(result.warnings.length, 1);
+});
