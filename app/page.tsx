@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowUpRight, ArrowRight, Check, ChevronDown, CircleHelp, ExternalLink, LoaderCircle, Search, Settings2, ShieldCheck, Sparkles, X } from 'lucide-react';
 import type { Analysis, Settings } from '@/lib/analysis';
 
+type StoredSettings = { baseUrl: string; model: string; hasApiKey: boolean; hasTavilyKey: boolean };
 type Config = { llmConfigured: boolean; searchConfigured: boolean; baseUrl: string; model: string };
 const examples = ['石墨烯发热内衣', '戴森吹风机', '胶原蛋白口服液'];
 const providers = [
@@ -24,6 +25,10 @@ export default function Home() {
   const [settings, setSettings] = useState<Settings>({});
   const [draft, setDraft] = useState<Settings>({});
   const [saved, setSaved] = useState(false);
+  const [stored, setStored] = useState<StoredSettings | null>(null);
+  const [restoring, setRestoring] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [storageMessage, setStorageMessage] = useState('');
   const [searchTesting, setSearchTesting] = useState(false);
   const [searchTest, setSearchTest] = useState<{ ok: boolean; text: string } | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
@@ -33,16 +38,24 @@ export default function Home() {
   const controller = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    fetch('/api/config').then(r => { if (!r.ok) throw new Error(); return r.json() as Promise<Config>; }).then(setConfig).catch(() => setError('暂时无法读取服务配置，请刷新页面。'));
+    const configRequest = fetch('/api/config').then(r => { if (!r.ok) throw new Error(); return r.json() as Promise<Config>; }).then(setConfig).catch(() => setError('暂时无法读取服务配置，请刷新页面。'));
+    const settingsRequest = fetch('/api/settings').then(r => { if (!r.ok) throw new Error(); return r.json() as Promise<StoredSettings>; }).then(data => {
+      setStored(data);
+      if (data.baseUrl || data.model) setSettings({ baseUrl: data.baseUrl, model: data.model });
+    }).catch(() => setError('暂时无法恢复浏览器中保存的配置，请稍后刷新重试。'));
+    void Promise.allSettled([configRequest, settingsRequest]).then(() => setRestoring(false));
     return () => controller.current?.abort();
   }, []);
   useEffect(() => { if (!loading) return; setElapsed(0); const interval = setInterval(() => setElapsed(s => s + 1), 1000); return () => clearInterval(interval); }, [loading]);
 
   const customBase = !!settings.baseUrl && settings.baseUrl.replace(/\/+$/, '') !== (config?.baseUrl || providers[0].url).replace(/\/+$/, '');
   const draftCustomBase = !!draft.baseUrl && draft.baseUrl.replace(/\/+$/, '') !== (config?.baseUrl || providers[0].url).replace(/\/+$/, '');
-  const serverKeyUsable = !!config?.llmConfigured && !draftCustomBase;
-  const configured = ((!customBase && config?.llmConfigured) || (!!settings.apiKey && !!settings.model)) && (config?.searchConfigured || !!settings.tavilyKey);
-  const openSettings = () => { setDraft({ baseUrl: config?.baseUrl || providers[0].url, model: config?.model || '', ...settings }); setSaved(false); setSearchTest(null); settingsDialog.current?.showModal(); };
+  const sameSavedBase = !!stored?.baseUrl && (settings.baseUrl || config?.baseUrl || providers[0].url).replace(/\/+$/, '') === stored.baseUrl.replace(/\/+$/, '');
+  const savedKeyUsable = !!stored?.hasApiKey && !!stored?.baseUrl && (draft.baseUrl || config?.baseUrl || providers[0].url).replace(/\/+$/, '') === stored.baseUrl.replace(/\/+$/, '');
+  const serverDefaultUsable = !!config?.llmConfigured && !draftCustomBase;
+  const serverKeyUsable = serverDefaultUsable || savedKeyUsable;
+  const configured = ((!customBase && config?.llmConfigured) || ((!!settings.apiKey || (sameSavedBase && stored?.hasApiKey)) && !!settings.model)) && (config?.searchConfigured || !!settings.tavilyKey || stored?.hasTavilyKey);
+  const openSettings = () => { setDraft({ baseUrl: config?.baseUrl || providers[0].url, model: config?.model || '', ...settings }); setSaved(false); setSearchTest(null); setStorageMessage(''); settingsDialog.current?.showModal(); };
   const testSearch = async () => {
     if (searchTesting) return;
     setSearchTesting(true); setSearchTest(null);
@@ -54,10 +67,38 @@ export default function Home() {
     } catch (e) { setSearchTest({ ok: false, text: e instanceof Error && e.name === 'TimeoutError' ? '联网搜索等待超时，请稍后重试。' : e instanceof Error ? e.message : '联网搜索测试失败。' }); }
     finally { setSearchTesting(false); }
   };
-  const saveSettings = (e: FormEvent) => {
+  const saveSettings = async (e: FormEvent) => {
     e.preventDefault();
-    setSettings(Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, (v || '').trim()])));
-    setSaved(true); settingsDialog.current?.close(); setError('');
+    if (saving) return;
+    setSaving(true); setStorageMessage('');
+    try {
+      const next = Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, (v || '').trim()]));
+      const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) });
+      const data = await response.json() as StoredSettings & { error?: string };
+      if (!response.ok) throw new Error(data.error || '浏览器配置保存失败，请重试。');
+      const confirmation = await fetch('/api/settings');
+      if (!confirmation.ok) throw new Error('配置保存后无法确认，请重试。');
+      const restored = await confirmation.json() as StoredSettings;
+      if ((data.hasApiKey && !restored.hasApiKey) || (data.hasTavilyKey && !restored.hasTavilyKey)) throw new Error('浏览器未允许保存 Cookie，请允许本网站 Cookie 后重试。');
+      setStored(restored);
+      // Keep restored/confirmed metadata only; saved plaintext keys leave React state.
+      const metadata = { baseUrl: data.baseUrl, model: data.model };
+      setSettings(metadata); setDraft(metadata);
+      setSaved(true); settingsDialog.current?.close(); setError('');
+    } catch (e) { setStorageMessage(e instanceof Error ? e.message : '浏览器配置保存失败，请重试。'); }
+    finally { setSaving(false); }
+  };
+  const forgetSettings = async () => {
+    if (saving || searchTesting) return;
+    setSaving(true); setStorageMessage('');
+    try {
+      const response = await fetch('/api/settings', { method: 'DELETE' });
+      const data = await response.json() as StoredSettings & { error?: string };
+      if (!response.ok) throw new Error(data.error || '清除配置失败，请重试。');
+      setStored(data); setSettings({}); setDraft({ baseUrl: config?.baseUrl || providers[0].url, model: config?.model || '' });
+      setSaved(false); setSearchTest(null); setError(''); setStorageMessage('已清除本浏览器保存的配置与密钥。');
+    } catch (e) { setStorageMessage(e instanceof Error ? e.message : '清除配置失败，请重试。'); }
+    finally { setSaving(false); }
   };
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -83,7 +124,7 @@ export default function Home() {
   return <div className="app">
     <header className="site-header">
       <a className="brand" href="/" aria-label="智商税首页"><span className="brand-icon">¥<span>?</span></span><span>智商税<span className="brand-dot">.</span></span></a>
-      <div className="header-actions"><span className="header-caption">让每一笔钱，花得明白。</span><button className="icon-button settings-button" onClick={openSettings} aria-label="接口设置"><Settings2 size={18}/><span>设置</span></button></div>
+      <div className="header-actions"><span className="header-caption">让每一笔钱，花得明白。</span><button className="icon-button settings-button" onClick={openSettings} disabled={restoring || saving} aria-label="接口设置"><Settings2 size={18}/><span>设置</span></button></div>
     </header>
 
     <main>
@@ -97,10 +138,10 @@ export default function Home() {
           <Search className="search-icon" size={22}/>
           <input ref={input} id="product" name="product" value={product} onChange={e => { setProduct(e.target.value); if (error) setError(''); }} placeholder="输入产品名称，看看值不值得买" maxLength={120} autoComplete="off" disabled={loading} required minLength={2}/>
           {product && !loading && <button type="button" className="clear-button" onClick={clear} aria-label="清空产品名称"><X size={17}/></button>}
-          <button className="submit-button" disabled={loading} type="submit">{loading ? <><LoaderCircle size={17} className="spin"/><span>判断中</span></> : <><span>判断一下</span><ArrowRight size={18}/></>}</button>
+          <button className="submit-button" disabled={loading || restoring} type="submit">{loading ? <><LoaderCircle size={17} className="spin"/><span>判断中</span></> : <><span>判断一下</span><ArrowRight size={18}/></>}</button>
         </form>
         <div className="examples"><span>试着搜搜</span>{examples.map(name => <button key={name} disabled={loading} onClick={() => { setProduct(name); setError(''); input.current?.focus(); }}>{name}<ArrowUpRight size={12}/></button>)}</div>
-        {saved && <p className="saved-note" role="status"><Check size={14}/>设置已应用，仅在当前页面会话中保留。</p>}
+        {saved && <p className="saved-note" role="status"><Check size={14}/>设置已保存至本浏览器，刷新后自动恢复，有效期 30 天。</p>}
         {config && !configured && !saved && <p className="setup-note">首次使用，<button onClick={openSettings}>连接你的 AI 接口 <ArrowUpRight size={12}/></button></p>}
         {error && <div className="error-box" role="alert"><CircleHelp size={18}/><span>{error}</span><button type="button" onClick={openSettings}>检查设置</button></div>}
       </section>
@@ -125,18 +166,20 @@ export default function Home() {
 
     <dialog ref={settingsDialog} className="modal" onClick={e => { if (e.target === e.currentTarget) settingsDialog.current?.close(); }}>
       <div className="modal-heading"><div><span className="section-label">连接服务</span><h2>你的 AI，你的判断。</h2></div><button className="icon-button" aria-label="关闭设置" onClick={() => settingsDialog.current?.close()}><X size={20}/></button></div>
-      <p className="modal-intro">支持 OpenAI 兼容接口。密钥仅用于本次会话，通过服务端转发，不保存在浏览器中。</p>
+      <p className="modal-intro">支持 OpenAI 兼容接口。配置与密钥以加密 Cookie 保存在本浏览器 30 天，刷新后自动恢复；服务器不持久化保存客户密钥。</p>
       <form onSubmit={saveSettings} className="settings-form">
         <label>接口地址 <span>Base URL</span><input type="url" value={draft.baseUrl || ''} onChange={e => setDraft({ ...draft, baseUrl: e.target.value })} required placeholder="https://api.openai.com/v1"/></label>
         <div className="provider-chips">{providers.map(p => <button type="button" key={p.name} className={draft.baseUrl === p.url ? 'selected' : ''} onClick={() => setDraft({ ...draft, baseUrl: p.url, model: '' })}>{p.name}</button>)}</div>
-        <label>模型名称<input value={draft.model || ''} onChange={e => setDraft({ ...draft, model: e.target.value })} required={!serverKeyUsable} placeholder="填写服务商提供的模型 ID" maxLength={120}/></label>
-        <label>API Key <span>{serverKeyUsable ? '服务端已配置，可留空' : '必填'}</span><input type="password" value={draft.apiKey || ''} onChange={e => setDraft({ ...draft, apiKey: e.target.value })} autoComplete="off" placeholder={serverKeyUsable ? '留空以使用服务端密钥' : '输入你的 API Key'} required={!serverKeyUsable} maxLength={512}/></label>
+        <label>模型名称<input value={draft.model || ''} onChange={e => setDraft({ ...draft, model: e.target.value })} required={!serverDefaultUsable} placeholder="填写服务商提供的模型 ID" maxLength={120}/></label>
+        <label>API Key <span>{savedKeyUsable ? '已保存，留空保留' : serverDefaultUsable ? '服务端已配置，可留空' : '必填'}</span><input type="password" value={draft.apiKey || ''} onChange={e => setDraft({ ...draft, apiKey: e.target.value })} autoComplete="off" placeholder={savedKeyUsable ? '已保存，留空保留原模型 Key' : serverDefaultUsable ? '留空以使用服务端密钥' : '输入你的 API Key'} required={!serverKeyUsable} maxLength={512}/></label>
         <div className="settings-divider"/>
-        <label>搜索接口 <span>Tavily Key · {config?.searchConfigured ? '选填' : '必填'}</span><input type="password" value={draft.tavilyKey || ''} onChange={e => setDraft({ ...draft, tavilyKey: e.target.value })} autoComplete="off" placeholder={config?.searchConfigured ? '留空则尝试默认搜索' : 'tvly-…'} required={!config?.searchConfigured} maxLength={512}/></label>
+        <label>搜索接口 <span>Tavily Key · {stored?.hasTavilyKey ? '已保存' : config?.searchConfigured ? '选填' : '必填'}</span><input type="password" value={draft.tavilyKey || ''} onChange={e => setDraft({ ...draft, tavilyKey: e.target.value })} autoComplete="off" placeholder={stored?.hasTavilyKey ? '已保存，留空保留原搜索 Key' : config?.searchConfigured ? '留空则尝试默认搜索' : 'tvly-…'} required={!config?.searchConfigured && !stored?.hasTavilyKey} maxLength={512}/></label>
         <p className="field-help">{config?.searchConfigured ? '默认搜索在云端可能被限流，建议填写 Tavily 专用搜索 Key。' : '使用 Tavily 搜索产品资料，或在服务端配置 SearXNG。'} <a href="https://app.tavily.com" target="_blank" rel="noopener noreferrer">获取 Key <ArrowUpRight size={11}/></a></p>
-        <button type="button" className="search-test-button" onClick={testSearch} disabled={searchTesting}>{searchTesting ? <LoaderCircle size={13} className="spin"/> : <Search size={13}/>} {searchTesting ? '正在测试联网搜索…' : '测试联网搜索'}</button>
+        <button type="button" className="search-test-button" onClick={testSearch} disabled={searchTesting || saving}>{searchTesting ? <LoaderCircle size={13} className="spin"/> : <Search size={13}/>} {searchTesting ? '正在测试联网搜索…' : '测试联网搜索'}</button>
         {searchTest && <p className={`search-test-result ${searchTest.ok ? 'success' : 'failure'}`} role="status">{searchTest.text}</p>}
-        <button type="submit" className="save-button">应用设置 <Check size={17}/></button>
+        {storageMessage && <p className="storage-message" role="status">{storageMessage}</p>}
+        <button type="submit" className="save-button" disabled={saving || searchTesting}>{saving ? <><LoaderCircle size={17} className="spin"/>处理中…</> : <>保存设置 <Check size={17}/></>}</button>
+        <button type="button" className="forget-settings" onClick={forgetSettings} disabled={saving || searchTesting}>清除已保存配置</button>
       </form>
     </dialog>
     <dialog ref={methodDialog} className="modal methodology" onClick={e => { if (e.target === e.currentTarget) methodDialog.current?.close(); }}><div className="modal-heading"><h2>我们怎么判断？</h2><button className="icon-button" aria-label="关闭判断说明" onClick={() => methodDialog.current?.close()}><X size={20}/></button></div><p>先检索产品名称、功效、价格和独立评测，再由 AI 比对公开信息。配置 Laya 后，它会作为额外的辅助信号参与分析。</p><ol><li><strong>功效有没有证据</strong><span>区分宣传说法、用户感受与独立研究，核对材料是否对应具体产品。</span></li><li><strong>价格是否匹配价值</strong><span>关注核心卖点与替代品；价格高和品牌溢价本身不意味着智商税。</span></li><li><strong>对什么人有用</strong><span>需求、使用场景和审美偏好，也属于真实价值。</span></li></ol><p className="method-note">百分比是 AI 对风险的主观估计，未经真实购买数据校准。证据不足时不显示分数；它不能替代检测报告、医疗建议或你自己的选择。</p></dialog>

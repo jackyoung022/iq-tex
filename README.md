@@ -15,7 +15,7 @@ npm run dev -- --host 0.0.0.0
 
 打开终端输出的本地地址，默认 `http://127.0.0.1:5173`。同一 Wi-Fi 的手机可访问 `http://电脑局域网IP:5173`。手机访问时，LLM 和搜索请求仍由电脑上的服务端执行。
 
-在右上角“设置”填写接口地址、模型 ID、API Key。没有服务端搜索配置时，还需填写 Tavily Key。页面密钥仅保留在 React 会话内存，不写入 localStorage、cookie 或文件；刷新后需要重填。请求通过同源后端转发，密钥不可避免地会经过你部署的服务端，请使用自己信任的实例。**本地 HTTP 调试只用于可信网络；正式使用应部署在 HTTPS 后。**
+在右上角“设置”填写接口地址、模型 ID、API Key。没有服务端搜索配置时，还需填写 Tavily Key。点击“保存设置”后，模型 Key、Tavily Key、接口地址和模型 ID 保存在此浏览器的加密 HttpOnly Cookie 中，30 天内刷新或重新打开都会恢复。支持“清除已保存配置”。不写入 localStorage 或客户密钥数据库；保存成功后页面只保留配置元数据，不再持有已保存密钥的明文。请求通过同源后端转发，密钥不可避免地会经过你部署的服务端，请使用自己信任的实例。**本地 HTTP 调试只用于可信网络；正式使用应部署在 HTTPS 后。**
 
 更适合长期使用的方式是在忽略提交的 `.env.local` 中配置：
 
@@ -103,3 +103,11 @@ Reader 格式为 `https://r.jina.ai/http://你的公开匿名SearXNG/search`；�
 格式校验失败时最多重新请求模型一次，复用原始检索资料，不重新搜索、不发送隐藏推理或错误草稿。纠正仍失败时，错误消息会指出未通过校验的字段，例如 `probability` 或 `reasons.0.sourceIds`。拒答和鉴权错误不会触发格式纠正。
 
 DeepSeek 接口参数依据 [官方 JSON Output 文档](https://api-docs.deepseek.com/guides/json_mode/) 与 [Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion/)。兼容与重试通过模拟上游测试；真实账号仍需在页面配置自己的密钥。
+
+## 浏览器 Cookie 持久化
+
+客户配置以 AES-256-GCM 加密，使用随机 IV 和认证标签。Cookie 是 host-only，限定 `Path=/api`，带 `HttpOnly`、`SameSite=Strict`；HTTPS 下带 `Secure`，有效期 30 天。服务端只在请求期间解密，GET `/api/settings` 只返回接口、模型和“是否已有密钥”，不会返回密钥。POST 保存/更新，DELETE 清除；跨站修改会被拒绝。
+
+部署者需配置稳定的 `SETTINGS_COOKIE_SECRET`，值为随机 32 字节的 base64url 字符串，保存在服务端秘密环境变量中。这是应用的 Cookie 加密密钥，不是客户的模型 Key；轮换它会使已有 Cookie 失效。本机开发配置和当前 Sites 运行环境已经配置。迁移到新服务器时需自行配置并保持稳定，切勿提交真实值。
+
+已保存的模型 Key 绑定原接口地址；切换接口时需填写新的 Key，应用不会把已保存的 Key 转发到另一个服务商。留空的密钥字段保留原值，彻底删除使用“清除已保存配置”。其他浏览器或设备有各自独立的 Cookie，需要分别配置。浏览器阻止 Cookie 时保存操作会报告失败。

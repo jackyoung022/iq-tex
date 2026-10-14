@@ -1,5 +1,6 @@
 import { AppError, searchProduct } from '@/lib/analysis';
 import { z } from 'zod';
+import { readSettings } from '@/lib/settings-cookie';
 const schema = z.object({ product: z.string().trim().min(2).max(120), tavilyKey: z.string().trim().max(512).optional() });
 const pending = new Map<string, number>();
 export async function POST(request: Request) {
@@ -19,7 +20,8 @@ export async function POST(request: Request) {
     if (pending.has(visitor)) throw new AppError('BUSY', '搜索测试正在进行，请稍后重试。', 429);
     pending.set(visitor, now);
     try {
-      const result = await searchProduct(checked.data.product, { tavilyKey: checked.data.tavilyKey }, process.env);
+      const stored = await readSettings(request, process.env);
+      const result = await searchProduct(checked.data.product, { tavilyKey: checked.data.tavilyKey || stored?.tavilyKey }, process.env);
       return Response.json({ provider: result.provider, count: result.sources.length, sources: result.sources.map(({ content: _content, ...source }) => source), warnings: result.warnings }, { headers });
     } finally { pending.delete(visitor); }
   } catch (e) {
