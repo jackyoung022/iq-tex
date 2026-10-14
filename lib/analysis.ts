@@ -108,6 +108,7 @@ export async function searchProduct(product: string, settings: Settings, env: En
   const queries = [product, `${product} 功效 评测 价格 研究`];
   const warnings: string[] = [];
   let lastError: unknown;
+  let tavilyError: unknown;
   let emptyResult: { sources: Source[]; provider: string; warnings: string[] } | undefined;
   const providers = [...(tavilyKey ? [{ kind: 'Tavily', endpoint: 'https://api.tavily.com/search' }] : []), ...endpoints.map(endpoint => ({ kind: 'SearXNG', endpoint }))];
   for (const provider of providers) {
@@ -145,11 +146,14 @@ export async function searchProduct(product: string, settings: Settings, env: En
     if (sources.length) return { sources, provider: provider.kind, warnings: [...warnings, ...(successful.length < responses.length ? ['部分检索请求失败，本次仅使用已返回的信息。'] : [])] };
     if (successful.length) emptyResult = { sources: [], provider: provider.kind, warnings: [...warnings] };
     const rejected = responses.find((r): r is PromiseRejectedResult => r.status === 'rejected');
-    if (rejected) lastError = rejected.reason;
+    if (rejected) {
+      lastError = rejected.reason;
+      if (provider.kind === 'Tavily') tavilyError = rejected.reason;
+    }
     warnings.push(provider.kind === 'Tavily' ? 'Tavily 未返回可用结果，已尝试备用联网搜索。' : '默认搜索未返回可用结果，已尝试备用联网搜索。');
   }
   if (emptyResult) return emptyResult;
-  throw lastError || new AppError('SEARCH_UNAVAILABLE', '联网搜索暂不可用，请稍后重试。');
+  throw tavilyError || lastError || new AppError('SEARCH_UNAVAILABLE', '联网搜索暂不可用，请稍后重试。');
 }
 
 async function layaScore(product: string, sources: Source[], env: Env, fetcher: Fetcher): Promise<Analysis['laya']> {

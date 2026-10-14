@@ -157,3 +157,7 @@ test('HTTPS Reader unwraps anonymous SearXNG JSON without forwarding any secrets
   assert.equal(result.sources.length, 2);
   assert.equal(result.sources[0].title, '产品官方资料');
 });
+
+test('a failed free backup cannot hide invalid Tavily credentials', async () => {
+  await assert.rejects(searchProduct('测试产品', { tavilyKey: 'invalid' }, env, async url => new Response('', {status: String(url).includes('tavily') ? 401 : 429})), /Tavily 搜索密钥/);
+});
