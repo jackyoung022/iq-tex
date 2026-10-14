@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     if (!data.success) throw new AppError('INPUT_INVALID', '请输入 2–120 个字符的产品名称。', 400);
     const visitor = request.headers.get('oai-authenticated-user-id') || request.headers.get('cf-connecting-ip') || 'local';
     const now = Date.now();
-    for (const [key, started] of active) if (now - started > 100000) active.delete(key);
+    for (const [key, started] of active) if (now - started > 150000) active.delete(key);
     if (active.has(visitor)) throw new AppError('BUSY', '已有判断正在进行，请稍后重试。', 429);
     active.set(visitor, now);
     try {

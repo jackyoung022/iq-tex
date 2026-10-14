@@ -43,7 +43,11 @@ async function requestJson(url: string, init: RequestInit, fetcher: Fetcher, ser
   try { response = await fetcher(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(timeout) }); }
   catch { throw new AppError('UPSTREAM_UNAVAILABLE', `${service}连接失败或超时，请稍后重试。`); }
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) throw new AppError('UPSTREAM_AUTH', `${service}拒绝访问，请检查 API Key 和接口权限。`);
+    if (response.status === 401 || response.status === 403) {
+      if (service === 'SearXNG 搜索') throw new AppError('SEARCH_ACCESS_DENIED', `搜索服务拒绝云端访问（HTTP ${response.status}），与 AI 模型的 API Key 无关。请重试或配置 Tavily 搜索 Key。`);
+      if (service === 'Tavily 搜索') throw new AppError('SEARCH_KEY_INVALID', 'Tavily 搜索密钥无效或没有权限，请检查 Tavily Key（它与 AI 模型的 API Key 不同）。');
+      throw new AppError('UPSTREAM_AUTH', `${service}拒绝访问，请检查 API Key 和接口权限。`);
+    }
     if (response.status === 429) throw new AppError('UPSTREAM_RATE_LIMIT', `${service}请求过多或额度不足，请稍后重试。`, 429);
     throw new AppError('UPSTREAM_ERROR', `${service}返回错误（${response.status}），请检查接口配置。`);
   }
@@ -73,23 +77,37 @@ export function resolveLLM(settings: Settings, env: Env) {
 
 export async function searchProduct(product: string, settings: Settings, env: Env, fetcher: Fetcher = fetch) {
   const tavilyKey = settings.tavilyKey || env.TAVILY_API_KEY;
-  const searx = env.SEARXNG_URL;
-  if (!tavilyKey && !searx) throw new AppError('SEARCH_CONFIG_REQUIRED', '请在设置中填写 Tavily Key，或由服务端配置 SEARXNG_URL。', 503);
+  const endpoints = [...new Set([env.SEARXNG_URL, ...(env.SEARXNG_FALLBACK_URLS || '').split(',')].map(s => s?.trim()).filter((s): s is string => !!s))].slice(0, 3);
+  if (!tavilyKey && !endpoints.length) throw new AppError('SEARCH_CONFIG_REQUIRED', '请在设置中填写 Tavily Key，或由服务端配置 SEARXNG_URL。', 503);
   const queries = [product, `${product} 功效 评测 价格 研究`];
-  const responses = await Promise.allSettled(queries.map(async query => {
-    if (tavilyKey) {
-      const d = await requestJson('https://api.tavily.com/search', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tavilyKey}` }, body: JSON.stringify({ query, search_depth: 'advanced', max_results: 6, include_answer: false }) }, fetcher, '联网搜索');
-      return Array.isArray(d.results) ? d.results : [];
-    }
-    const url = new URL(searx!);
-    url.searchParams.set('q', query); url.searchParams.set('format', 'json'); url.searchParams.set('language', 'zh-CN'); url.searchParams.set('categories', 'general');
-    const d = await requestJson(url.href, {}, fetcher, '联网搜索');
-    return Array.isArray(d.results) ? d.results.slice(0, 8) : [];
-  }));
-  const successful = responses.filter(r => r.status === 'fulfilled');
-  if (!successful.length) throw (responses[0] as PromiseRejectedResult).reason;
-  const sources = cleanSources(successful.flatMap(r => (r as PromiseFulfilledResult<unknown[]>).value));
-  return { sources, provider: tavilyKey ? 'Tavily' : 'SearXNG', warnings: successful.length < queries.length ? ['部分检索请求失败，本次仅使用已返回的信息。'] : [] };
+  const warnings: string[] = [];
+  let lastError: unknown;
+  let emptyResult: { sources: Source[]; provider: string; warnings: string[] } | undefined;
+  const providers = [...(tavilyKey ? [{ kind: 'Tavily', endpoint: 'https://api.tavily.com/search' }] : []), ...endpoints.map(endpoint => ({ kind: 'SearXNG', endpoint }))];
+  for (const provider of providers) {
+    const responses = await Promise.allSettled(queries.map(async query => {
+      let data;
+      if (provider.kind === 'Tavily') {
+        data = await requestJson(provider.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tavilyKey}` }, body: JSON.stringify({ query, search_depth: 'advanced', max_results: 6, include_answer: false }) }, fetcher, 'Tavily 搜索', 15000);
+      } else {
+        let url: URL;
+        try { url = new URL(provider.endpoint); } catch { throw new AppError('SEARCH_CONFIG_INVALID', '服务端搜索地址格式不正确。', 503); }
+        url.searchParams.set('q', query); url.searchParams.set('format', 'json'); url.searchParams.set('language', 'zh-CN'); url.searchParams.set('categories', 'general');
+        data = await requestJson(url.href, {}, fetcher, 'SearXNG 搜索', 12000);
+      }
+      if (!data || !Array.isArray(data.results)) throw new AppError('SEARCH_FORMAT', `${provider.kind} 搜索没有返回有效结果，请重试或更换搜索服务。`);
+      return data.results.slice(0, 8);
+    }));
+    const successful = responses.filter((r): r is PromiseFulfilledResult<unknown[]> => r.status === 'fulfilled');
+    const sources = cleanSources(successful.flatMap(r => r.value));
+    if (sources.length) return { sources, provider: provider.kind, warnings: [...warnings, ...(successful.length < queries.length ? ['部分检索请求失败，本次仅使用已返回的信息。'] : [])] };
+    if (successful.length) emptyResult = { sources: [], provider: provider.kind, warnings: [...warnings] };
+    const rejected = responses.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (rejected) lastError = rejected.reason;
+    warnings.push(provider.kind === 'Tavily' ? 'Tavily 未返回可用结果，已尝试备用联网搜索。' : '默认搜索未返回可用结果，已尝试备用联网搜索。');
+  }
+  if (emptyResult) return emptyResult;
+  throw lastError || new AppError('SEARCH_UNAVAILABLE', '联网搜索暂不可用，请稍后重试。');
 }
 
 async function layaScore(product: string, sources: Source[], env: Env, fetcher: Fetcher): Promise<Analysis['laya']> {

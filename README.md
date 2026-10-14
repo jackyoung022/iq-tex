@@ -33,7 +33,7 @@ TAVILY_API_KEY=你的Tavily密钥
 
 ## 联网搜索与判断
 
-- 依次采用页面 Tavily Key、服务端 Tavily Key，或服务端 `SEARXNG_URL`。
+- 优先采用页面 Tavily Key、服务端 Tavily Key，然后使用服务端 `SEARXNG_URL` 及 `SEARXNG_FALLBACK_URLS`（逗号分隔的备用地址）。上游拒绝、超时、无有效结果时会尝试备用服务，且不把 Tavily Key 转发给 SearXNG。
 - 并行检索产品名称和功效/评测/价格/研究，最多合并 12 条有效、去重的来源摘要。
 - LLM 检查产品匹配、功效证据、价格价值和使用场景。网页材料按不可信数据处理。
 - Zod 校验结构、概率范围及引用编号；越界分数、编造引用、截断输出会报错。
@@ -83,3 +83,9 @@ npm start
 参考 [OpenAI JSON mode 文档](https://developers.openai.com/api/docs/guides/structured-outputs#json-mode)、[Tavily Search 文档](https://docs.tavily.com/documentation/api-reference/endpoint/search)。
 
 浏览器 QA 使用本地 `tests/fixture-server.mjs`，明确标注夹具数据，验证成功评分、证据不足和设置弹窗；不将测试分数作为真实产品判断。390px 手机和 1440px 桌面布局均无横向溢出。当前 Ego Lite 截图接口超时，未完成截图视觉核验。
+
+## 搜索连接排查
+
+设置弹窗中的“测试联网搜索”通过 `POST /api/search` 实际检索当前产品，不调用 LLM、无需模型 API Key。Tavily 的密钥错误与 SearXNG 的云端访问拒绝分别显示。
+
+当前云端默认使用经过生产验证的公共 HTTPS SearXNG 实例，不依赖本机的 HTTP 非标准端口；本地开发仍可使用自建服务。公共实例会收到产品检索词，并可能限流或暂时不可用；可替换为自己的 HTTPS 实例，或填写 Tavily Key。

@@ -24,6 +24,8 @@ export default function Home() {
   const [settings, setSettings] = useState<Settings>({});
   const [draft, setDraft] = useState<Settings>({});
   const [saved, setSaved] = useState(false);
+  const [searchTesting, setSearchTesting] = useState(false);
+  const [searchTest, setSearchTest] = useState<{ ok: boolean; text: string } | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const settingsDialog = useRef<HTMLDialogElement>(null);
   const methodDialog = useRef<HTMLDialogElement>(null);
@@ -40,7 +42,18 @@ export default function Home() {
   const draftCustomBase = !!draft.baseUrl && draft.baseUrl.replace(/\/+$/, '') !== (config?.baseUrl || providers[0].url).replace(/\/+$/, '');
   const serverKeyUsable = !!config?.llmConfigured && !draftCustomBase;
   const configured = ((!customBase && config?.llmConfigured) || (!!settings.apiKey && !!settings.model)) && (config?.searchConfigured || !!settings.tavilyKey);
-  const openSettings = () => { setDraft({ baseUrl: config?.baseUrl || providers[0].url, model: config?.model || '', ...settings }); setSaved(false); settingsDialog.current?.showModal(); };
+  const openSettings = () => { setDraft({ baseUrl: config?.baseUrl || providers[0].url, model: config?.model || '', ...settings }); setSaved(false); setSearchTest(null); settingsDialog.current?.showModal(); };
+  const testSearch = async () => {
+    if (searchTesting) return;
+    setSearchTesting(true); setSearchTest(null);
+    try {
+      const response = await fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ product: product.trim().length >= 2 ? product.trim() : '戴森吹风机', tavilyKey: draft.tavilyKey?.trim() }), signal: AbortSignal.timeout(55000) });
+      const data = await response.json() as { count: number; provider: string; error?: string; warnings?: string[] };
+      if (!response.ok) throw new Error(data.error || '联网搜索测试失败，请重试。');
+      setSearchTest({ ok: data.count > 0, text: data.count > 0 ? `联网搜索可用，已找到 ${data.count} 条资料（${data.provider}）。${data.warnings?.length ? '已自动使用备用搜索。' : ''}` : '搜索服务已连接，但本次没有检索到资料，请尝试更具体的产品名。' });
+    } catch (e) { setSearchTest({ ok: false, text: e instanceof Error && e.name === 'TimeoutError' ? '联网搜索等待超时，请稍后重试。' : e instanceof Error ? e.message : '联网搜索测试失败。' }); }
+    finally { setSearchTesting(false); }
+  };
   const saveSettings = (e: FormEvent) => {
     e.preventDefault();
     setSettings(Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, (v || '').trim()])));
@@ -120,7 +133,9 @@ export default function Home() {
         <label>API Key <span>{serverKeyUsable ? '服务端已配置，可留空' : '必填'}</span><input type="password" value={draft.apiKey || ''} onChange={e => setDraft({ ...draft, apiKey: e.target.value })} autoComplete="off" placeholder={serverKeyUsable ? '留空以使用服务端密钥' : '输入你的 API Key'} required={!serverKeyUsable} maxLength={512}/></label>
         <div className="settings-divider"/>
         <label>搜索接口 <span>Tavily Key · {config?.searchConfigured ? '选填' : '必填'}</span><input type="password" value={draft.tavilyKey || ''} onChange={e => setDraft({ ...draft, tavilyKey: e.target.value })} autoComplete="off" placeholder={config?.searchConfigured ? '已提供联网搜索，可留空' : 'tvly-…'} required={!config?.searchConfigured} maxLength={512}/></label>
-        <p className="field-help">{config?.searchConfigured ? '默认使用服务端的联网搜索；填写后改用 Tavily。' : '使用 Tavily 搜索产品资料，或在服务端配置 SearXNG。'} <a href="https://app.tavily.com" target="_blank" rel="noopener noreferrer">获取 Key <ArrowUpRight size={11}/></a></p>
+        <p className="field-help">{config?.searchConfigured ? '默认提供免费联网搜索，Tavily Key 可留空；填写后优先使用 Tavily。' : '使用 Tavily 搜索产品资料，或在服务端配置 SearXNG。'} <a href="https://app.tavily.com" target="_blank" rel="noopener noreferrer">获取 Key <ArrowUpRight size={11}/></a></p>
+        <button type="button" className="search-test-button" onClick={testSearch} disabled={searchTesting}>{searchTesting ? <LoaderCircle size={13} className="spin"/> : <Search size={13}/>} {searchTesting ? '正在测试联网搜索…' : '测试联网搜索'}</button>
+        {searchTest && <p className={`search-test-result ${searchTest.ok ? 'success' : 'failure'}`} role="status">{searchTest.text}</p>}
         <button type="submit" className="save-button">应用设置 <Check size={17}/></button>
       </form>
     </dialog>

@@ -92,3 +92,31 @@ test('redirects are stopped before sending credentials to another origin', async
     return new Response('', { status: 302, headers: { Location: 'https://untrusted.example' } });
   }), /302/);
 });
+test('a SearXNG 403 reports a search access issue rather than an LLM key problem', async () => {
+  await assert.rejects(searchProduct('测试产品', {}, env, async () => new Response('', { status: 403 })), e => e instanceof Error && /搜索服务拒绝云端访问/.test(e.message) && !e.message.includes('请检查 API Key'));
+});
+test('a rejected primary search fails over to HTTPS backup without forwarding any keys', async () => {
+  const requests: string[] = [];
+  const result = await searchProduct('测试产品', {}, { ...env, SEARXNG_FALLBACK_URLS: 'https://backup.example/search' }, async (url, init) => {
+    requests.push(String(url));
+    assert.equal(init?.headers, undefined);
+    return String(url).includes('backup.example') ? ok({ results: rows }) : new Response('', { status: 403 });
+  });
+  assert.equal(result.sources.length, 2);
+  assert.equal(result.warnings.length, 1);
+  assert.equal(requests.length, 4);
+});
+test('invalid Tavily credentials fall back when a default search is configured', async () => {
+  const result = await searchProduct('测试产品', { tavilyKey: 'invalid-test-key' }, env, async (url, init) => {
+    if (String(url).includes('tavily')) return new Response('', { status: 401 });
+    assert.equal(init?.headers, undefined);
+    return ok({ results: rows });
+  });
+  assert.equal(result.provider, 'SearXNG');
+  assert.equal(result.sources.length, 2);
+  assert.ok(result.warnings[0].includes('Tavily'));
+});
+test('Tavily alone explains the correct credential and HTML is never treated as empty evidence', async () => {
+  await assert.rejects(searchProduct('测试产品', { tavilyKey: 'invalid' }, {}, async () => new Response('', { status: 401 })), /Tavily 搜索密钥/);
+  await assert.rejects(searchProduct('测试产品', {}, env, async () => ok({ message: 'blocked' })), /没有返回有效结果/);
+});
