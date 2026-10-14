@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { load } from 'cheerio/slim';
 
 export class AppError extends Error {
   constructor(public code: string, message: string, public status = 502) { super(message); }
@@ -52,7 +53,7 @@ export function relevantSources(product: string, sources: Source[]): Source[] {
   }).map((source, index) => ({ ...source, id: index + 1 }));
 }
 
-async function requestJson(url: string, init: RequestInit, fetcher: Fetcher, service: string, timeout = 25000) {
+async function requestText(url: string, init: RequestInit, fetcher: Fetcher, service: string, timeout = 25000) {
   let response: Response;
   try { response = await fetcher(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(timeout) }); }
   catch { throw new AppError('UPSTREAM_UNAVAILABLE', `${service}连接失败或超时，请稍后重试。`); }
@@ -67,8 +68,19 @@ async function requestJson(url: string, init: RequestInit, fetcher: Fetcher, ser
   }
   const text = await response.text();
   if (text.length > 1_500_000) throw new AppError('UPSTREAM_TOO_LARGE', `${service}响应过大。`);
+  return text;
+}
+async function requestJson(url: string, init: RequestInit, fetcher: Fetcher, service: string, timeout = 25000) {
+  const text = await requestText(url, init, fetcher, service, timeout);
   try { return JSON.parse(text); }
   catch { throw new AppError('UPSTREAM_FORMAT', `${service}返回的格式无法读取。`); }
+}
+export function parseSearxHTML(html: string) {
+  const $ = load(html);
+  return $('article.result').map((_index, element) => {
+    const card = $(element), link = card.find('h3 a').first();
+    return { title: link.text(), url: link.attr('href'), content: card.find('.content').text() };
+  }).get();
 }
 
 export function resolveLLM(settings: Settings, env: Env) {
@@ -99,22 +111,31 @@ export async function searchProduct(product: string, settings: Settings, env: En
   let emptyResult: { sources: Source[]; provider: string; warnings: string[] } | undefined;
   const providers = [...(tavilyKey ? [{ kind: 'Tavily', endpoint: 'https://api.tavily.com/search' }] : []), ...endpoints.map(endpoint => ({ kind: 'SearXNG', endpoint }))];
   for (const provider of providers) {
-    const responses = await Promise.allSettled(queries.map(async query => {
+    const responses: PromiseSettledResult<unknown[]>[] = [];
+    for (const query of queries) {
+      try {
       let data;
       if (provider.kind === 'Tavily') {
         data = await requestJson(provider.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tavilyKey}` }, body: JSON.stringify({ query, search_depth: 'advanced', max_results: 6, include_answer: false }) }, fetcher, 'Tavily 搜索', 15000);
       } else {
         let url: URL;
         try { url = new URL(provider.endpoint); } catch { throw new AppError('SEARCH_CONFIG_INVALID', '服务端搜索地址格式不正确。', 503); }
-        url.searchParams.set('q', query); url.searchParams.set('format', 'json'); url.searchParams.set('language', 'zh-CN'); url.searchParams.set('categories', 'general');
-        data = await requestJson(url.href, {}, fetcher, 'SearXNG 搜索', 12000);
+        const format = url.searchParams.get('format') === 'html' ? 'html' : 'json';
+        url.searchParams.set('q', query); url.searchParams.set('format', format); url.searchParams.set('language', 'zh-CN'); url.searchParams.set('categories', 'general');
+        const request = { headers: { Accept: format === 'html' ? 'text/html' : 'application/json', 'User-Agent': 'IQTaxConsumerAssistant/1.0' } };
+        data = format === 'html'
+          ? { results: parseSearxHTML(await requestText(url.href, request, fetcher, 'SearXNG 搜索', 12000)) }
+          : await requestJson(url.href, request, fetcher, 'SearXNG 搜索', 12000);
       }
       if (!data || !Array.isArray(data.results)) throw new AppError('SEARCH_FORMAT', `${provider.kind} 搜索没有返回有效结果，请重试或更换搜索服务。`);
-      return data.results.slice(0, 8);
-    }));
+      responses.push({ status: 'fulfilled', value: data.results.slice(0, 12) });
+      const collected = responses.filter((r): r is PromiseFulfilledResult<unknown[]> => r.status === 'fulfilled').flatMap(r => r.value);
+      if (provider.kind === 'SearXNG' && relevantSources(product, cleanSources(collected)).length >= 4) break;
+      } catch (reason) { responses.push({ status: 'rejected', reason }); }
+    }
     const successful = responses.filter((r): r is PromiseFulfilledResult<unknown[]> => r.status === 'fulfilled');
     const sources = relevantSources(product, cleanSources(successful.flatMap(r => r.value)));
-    if (sources.length) return { sources, provider: provider.kind, warnings: [...warnings, ...(successful.length < queries.length ? ['部分检索请求失败，本次仅使用已返回的信息。'] : [])] };
+    if (sources.length) return { sources, provider: provider.kind, warnings: [...warnings, ...(successful.length < responses.length ? ['部分检索请求失败，本次仅使用已返回的信息。'] : [])] };
     if (successful.length) emptyResult = { sources: [], provider: provider.kind, warnings: [...warnings] };
     const rejected = responses.find((r): r is PromiseRejectedResult => r.status === 'rejected');
     if (rejected) lastError = rejected.reason;

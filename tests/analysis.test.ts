@@ -99,7 +99,8 @@ test('a rejected primary search fails over to HTTPS backup without forwarding an
   const requests: string[] = [];
   const result = await searchProduct('测试产品', {}, { ...env, SEARXNG_FALLBACK_URLS: 'https://backup.example/search' }, async (url, init) => {
     requests.push(String(url));
-    assert.equal(init?.headers, undefined);
+    assert.ok(!JSON.stringify(init?.headers).includes('invalid-test-key'));
+    assert.ok(!(init?.headers as Record<string, string>)?.Authorization);
     return String(url).includes('backup.example') ? ok({ results: rows }) : new Response('', { status: 403 });
   });
   assert.equal(result.sources.length, 2);
@@ -109,7 +110,8 @@ test('a rejected primary search fails over to HTTPS backup without forwarding an
 test('invalid Tavily credentials fall back when a default search is configured', async () => {
   const result = await searchProduct('测试产品', { tavilyKey: 'invalid-test-key' }, env, async (url, init) => {
     if (String(url).includes('tavily')) return new Response('', { status: 401 });
-    assert.equal(init?.headers, undefined);
+    assert.ok(!JSON.stringify(init?.headers).includes('invalid-test-key'));
+    assert.ok(!(init?.headers as Record<string, string>)?.Authorization);
     return ok({ results: rows });
   });
   assert.equal(result.provider, 'SearXNG');
@@ -127,4 +129,21 @@ test('unrelated engine results trigger backup instead of being passed to the mod
   assert.equal(result.sources[0].id, 1);
   assert.ok(result.sources[0].title.includes('戴森'));
   assert.equal(result.warnings.length, 1);
+});
+
+test('HTML search extracts result cards while ignoring scripts and navigation', async () => {
+  const html = '<script>fake secret</script><a href="javascript:alert(1)">menu</a><article class="result result-default"><h3><a href="https://dyson.example/product">戴森吹风机</a></h3><p class="content">独立研究摘要 &amp; 参数。</p></article>';
+  const result = await searchProduct('戴森吹风机', {}, { SEARXNG_URL: 'https://search.example/search?format=html' }, async (url, init) => {
+    assert.equal(new URL(String(url)).searchParams.get('format'), 'html');
+    assert.ok(!(init?.headers as Record<string,string>).Authorization);
+    return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html' } });
+  });
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0].content, '独立研究摘要 & 参数。');
+});
+test('a useful SearXNG response avoids an unnecessary second request', async () => {
+  let count = 0;
+  const result = await searchProduct('测试产品', {}, env, async () => { count++; return ok({results: Array.from({length:4},(_,i)=>({title:'测试产品资料',content:'测试产品的独立研究。',url:`https://research${i}.example/report`}))}); });
+  assert.equal(count, 1);
+  assert.equal(result.sources.length, 4);
 });
