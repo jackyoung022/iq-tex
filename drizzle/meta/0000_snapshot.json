@@ -1,0 +1,96 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "d751ece4-0101-4510-ade5-9eb91b997332",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "public_searches": {
+      "name": "public_searches",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "product_key": {
+          "name": "product_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product": {
+          "name": "product",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "search_count": {
+          "name": "search_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "first_searched_at": {
+          "name": "first_searched_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_searched_at": {
+          "name": "last_searched_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "public_searches_product_key": {
+          "name": "public_searches_product_key",
+          "columns": [
+            "product_key"
+          ],
+          "isUnique": true
+        },
+        "public_searches_recent": {
+          "name": "public_searches_recent",
+          "columns": [
+            "last_searched_at",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "public_searches_product_length": {
+          "name": "public_searches_product_length",
+          "value": "length(\"public_searches\".\"product\") BETWEEN 2 AND 120"
+        },
+        "public_searches_positive_count": {
+          "name": "public_searches_positive_count",
+          "value": "\"public_searches\".\"search_count\" >= 1"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

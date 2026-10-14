@@ -1,6 +1,7 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
+import cloudflareDeploy from "./cloudflare.deploy.json";
 import { readExecutionProfile } from "./scripts/execution-profile.mjs";
 import { sites } from "./build/sites-vite-plugin";
 import { connectorPreview } from "./build/connector-preview-plugin.mjs";
@@ -69,6 +70,9 @@ export default defineConfig(async ({ command }) => {
         inspectorPort: false,
         config: {
           ...localBindingConfig,
+          ...(command === "serve" && !d1
+            ? { d1_databases: [{ binding: "DB", database_name: cloudflareDeploy.env.DB.name, database_id: cloudflareDeploy.env.DB.id }] }
+            : {}),
           ...(command === "serve"
             ? {
                 services: [

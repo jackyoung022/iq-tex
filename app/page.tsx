@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowUpRight, ArrowRight, Check, ChevronDown, CircleHelp, ExternalLink, LoaderCircle, Search, Settings2, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { ArrowUpRight, ArrowRight, Check, ChevronDown, CircleHelp, ExternalLink, History, LoaderCircle, Search, Settings2, ShieldCheck, Sparkles, X } from 'lucide-react';
 import type { Analysis, Settings } from '@/lib/analysis';
 
 type StoredSettings = { baseUrl: string; model: string; hasApiKey: boolean; hasTavilyKey: boolean };
@@ -38,6 +38,8 @@ export default function Home() {
   const controller = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    const selected = new URL(window.location.href).searchParams.get('product');
+    if (selected) setProduct(selected.trim().slice(0, 120));
     const configRequest = fetch('/api/config').then(r => { if (!r.ok) throw new Error(); return r.json() as Promise<Config>; }).then(setConfig).catch(() => setError('暂时无法读取服务配置，请刷新页面。'));
     const settingsRequest = fetch('/api/settings').then(r => { if (!r.ok) throw new Error(); return r.json() as Promise<StoredSettings>; }).then(data => {
       setStored(data);
@@ -124,7 +126,7 @@ export default function Home() {
   return <div className="app">
     <header className="site-header">
       <a className="brand" href="/" aria-label="智商税首页"><span className="brand-icon">¥<span>?</span></span><span>智商税<span className="brand-dot">.</span></span></a>
-      <div className="header-actions"><span className="header-caption">让每一笔钱，花得明白。</span><button className="icon-button settings-button" onClick={openSettings} disabled={restoring || saving} aria-label="接口设置"><Settings2 size={18}/><span>设置</span></button></div>
+      <div className="header-actions"><a className="history-link" href="/history"><History size={16}/><span>大家搜过</span></a><button className="icon-button settings-button" onClick={openSettings} disabled={restoring || saving} aria-label="接口设置"><Settings2 size={18}/><span>设置</span></button></div>
     </header>
 
     <main>
@@ -140,6 +142,7 @@ export default function Home() {
           {product && !loading && <button type="button" className="clear-button" onClick={clear} aria-label="清空产品名称"><X size={17}/></button>}
           <button className="submit-button" disabled={loading || restoring} type="submit">{loading ? <><LoaderCircle size={17} className="spin"/><span>判断中</span></> : <><span>判断一下</span><ArrowRight size={18}/></>}</button>
         </form>
+        <p className="public-search-note">提交后的产品名称会展示在<a href="/history">公开搜索记录</a>中，请只填写产品信息。</p>
         <div className="examples"><span>试着搜搜</span>{examples.map(name => <button key={name} disabled={loading} onClick={() => { setProduct(name); setError(''); input.current?.focus(); }}>{name}<ArrowUpRight size={12}/></button>)}</div>
         {saved && <p className="saved-note" role="status"><Check size={14}/>设置已保存至本浏览器，刷新后自动恢复，有效期 30 天。</p>}
         {config && !configured && !saved && <p className="setup-note">首次使用，<button onClick={openSettings}>连接你的 AI 接口 <ArrowUpRight size={12}/></button></p>}

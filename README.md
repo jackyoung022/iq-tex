@@ -1,51 +1,209 @@
-# 智商税 · 消费判断助手
+# 智商税 · 买之前，想明白
 
-适配桌面和手机的中文 Web 小应用。输入产品名称，联网检索公开资料，再通过 **OpenAI 兼容 Chat Completions API** 综合判断，显示 0–100% 的智商税风险估计、理由、购买建议及可点击的来源。证据不足时返回“暂无法判断”，不伪造分数。
+一个适配电脑和手机的 AI 消费判断工具。输入产品名称，应用先联网搜索公开资料，再通过 OpenAI 兼容接口调用大模型，给出智商税风险估计、判断理由、购买建议和资料来源。证据不足时显示“暂无法判断”。
+
+[在线体验](https://iq-tax-check.jackyra.workers.dev/) · [大家搜过什么](https://iq-tax-check.jackyra.workers.dev/history)
+
+> 百分比是 AI 对风险的主观估计，未经真实消费案例校准。它不等于统计概率、检测报告或产品质量鉴定，判断可能受到资料、型号、价格和个人需求的影响。
+
+## 功能
+
+- **产品判断**：输入产品名称，展示 0–100% 风险估计、证据等级、理由和购买建议。
+- **联网检索**：支持 Tavily 和自建 SearXNG，去重并筛选相关资料，保留可点击的来源。
+- **自选模型**：兼容 Chat Completions API，提供 OpenAI、DeepSeek、通义千问、Moonshot、硅基流动、OpenRouter 地址预设。
+- **浏览器配置恢复**：配置与密钥以加密 HttpOnly Cookie 保存 30 天，支持更新和清除。
+- **公开搜索记录**：使用 Cloudflare D1 展示产品名称、搜索次数和最近搜索时间，支持筛选、分页和再次判断。
+- **可选 Laya**：已实现自托管 HTTP 服务适配；默认关闭，当前在线实例未启用。
+- **Cloudflare 部署**：使用官方 `cf` CLI 部署 Worker、静态资源和 D1 迁移。
+
+## 使用方法
+
+1. 打开应用，点击右上角“设置”。
+2. 选择接口服务商，填写接口地址、模型 ID 和自己的模型 API Key。
+3. 填写 **Tavily 专用搜索 Key**，点击“测试联网搜索”检查连接。
+4. 点击“保存设置”，输入具体的产品名称，再点击“判断一下”。
+
+模型 Key 和 Tavily Key 属于不同服务，不能混用。模型名称应使用服务商实际提供的 ID；接口地址填到 `/v1` 或相应兼容路径，应用会追加 `/chat/completions`。
+
+同一浏览器刷新后可恢复配置，其他浏览器或设备需要分别设置。“再判断”只预填产品名称，不会自动调用模型。
+
+## 技术栈
+
+| 部分 | 实现 |
+| --- | --- |
+| 界面 | React 19、TypeScript、响应式 CSS、Lucide 图标 |
+| 框架与构建 | Vinext、Vite |
+| 服务端 | Cloudflare Workers |
+| 搜索 | Tavily / SearXNG |
+| 模型 | OpenAI 兼容 Chat Completions API |
+| 数据库 | Cloudflare D1、Drizzle 表结构及迁移 |
+| 数据校验 | Zod |
+| 配置保护 | AES-256-GCM、HttpOnly Cookie |
 
 ## 本地运行
 
-要求 Node.js 22.13+。
+需要 **Node.js 22.13+** 和 npm。
 
 ```bash
-cd iq-tax # 如果已经在应用目录则跳过
+git clone https://github.com/jackyoung022/iq-tex.git
+cd iq-tex
 npm ci
 cp .env.example .env.local
+```
+
+首次配置时生成本地 Cookie 加密密钥，直接写入 `.env.local`，不输出密钥：
+
+```bash
+node --input-type=module <<'JS'
+import { randomBytes } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+const path = '.env.local';
+const text = readFileSync(path, 'utf8');
+writeFileSync(path, text.replace(/^SETTINGS_COOKIE_SECRET=.*$/m,
+  'SETTINGS_COOKIE_SECRET=' + randomBytes(32).toString('base64url')));
+JS
+
+npm run dev
+```
+
+打开终端输出的地址，默认 `http://localhost:5173`。在页面设置中填写模型 Key 和 Tavily Key，即可运行判断。不要在每次启动时重新生成 Cookie 密钥，否则之前保存的配置会失效。
+
+如需在同一可信局域网内用手机调试：
+
+```bash
 npm run dev -- --host 0.0.0.0
 ```
 
-打开终端输出的本地地址，默认 `http://127.0.0.1:5173`。同一 Wi-Fi 的手机可访问 `http://电脑局域网IP:5173`。手机访问时，LLM 和搜索请求仍由电脑上的服务端执行。
+手机访问 `http://电脑局域网IP:5173`。模型和搜索请求由电脑上的后端执行。正式部署使用 HTTPS。
 
-在右上角“设置”填写接口地址、模型 ID、API Key。没有服务端搜索配置时，还需填写 Tavily Key。点击“保存设置”后，模型 Key、Tavily Key、接口地址和模型 ID 保存在此浏览器的加密 HttpOnly Cookie 中，30 天内刷新或重新打开都会恢复。支持“清除已保存配置”。不写入 localStorage 或客户密钥数据库；保存成功后页面只保留配置元数据，不再持有已保存密钥的明文。请求通过同源后端转发，密钥不可避免地会经过你部署的服务端，请使用自己信任的实例。**本地 HTTP 调试只用于可信网络；正式使用应部署在 HTTPS 后。**
+### 本地搜索记录数据库
 
-更适合长期使用的方式是在忽略提交的 `.env.local` 中配置：
+本地 D1 与线上 D1 独立，不会自动下载客户记录。先执行本地迁移，再启动开发服务器：
 
-```dotenv
-OPENAI_BASE_URL=https://你的兼容服务商/v1
-OPENAI_API_KEY=你的密钥
-OPENAI_MODEL=你的模型ID
-TAVILY_API_KEY=你的Tavily密钥
-# 或：SEARXNG_URL=https://你的搜索服务/search
+```bash
+npm run db:migrate:local
+npm run dev
 ```
 
-当前开发目录已配置本机已有的 SearXNG 地址，不包含 LLM Key；复制示例文件会覆盖该配置。首次填写模型 ID 请使用服务商实际支持的名称。
+脚本读取 `cloudflare.deploy.json` 的 `env.DB`，使用项目锁定版本的 Wrangler，在 `.wrangler/state` 创建本地数据库。无需登录 Cloudflare，不会修改线上数据库。未执行迁移时，本地判断仍可运行，公开记录页面会提示读取失败。不要让不同版本的 `cf` 本地模拟器与 Wrangler 共用这份状态目录。
 
-支持 OpenAI、DeepSeek、通义千问、Moonshot、硅基流动、OpenRouter 预设地址。页面输入的自定义 API 域名需加入服务端 `OPENAI_ALLOWED_HOSTS`（逗号分隔）；服务端配置的 `OPENAI_BASE_URL` 自动受信任。切换页面服务商时必须填写该服务商的 Key，服务端默认密钥不会被转发到另一个接口。`Base URL` 填到 `/v1` 或兼容路径即可，程序追加 `/chat/completions`。不支持 `response_format` 的接口可设 `OPENAI_JSON_MODE=false`，仍严格验证返回 JSON。
+## 环境变量
 
-## 联网搜索与判断
+`.env.example` 提供所有支持的配置。`.env.local` 只用于本机开发，**不会自动上传到 Cloudflare**。
 
-- 优先采用页面 Tavily Key、服务端 Tavily Key，然后使用服务端 `SEARXNG_URL` 及 `SEARXNG_FALLBACK_URLS`（逗号分隔的备用地址）。上游拒绝、超时、无有效结果时会尝试备用服务，且不把 Tavily Key 转发给 SearXNG。
-- 检索产品名称和功效/评测/价格/研究，最多合并 12 条有效、去重且与产品相关的来源摘要；免费 SearXNG 顺序请求，并在已有足够资料时减少请求以避免限流。
-- LLM 检查产品匹配、功效证据、价格价值和使用场景。网页材料按不可信数据处理。
-- Zod 校验结构、概率范围及引用编号；越界分数、编造引用、截断输出会报错。
-- 至少引用两个不同域名，并且每条理由有引用，才允许显示概率。该规则仅减少单一来源误导，不代表不同域名一定独立或真实。
-- 不抓取源网页全文；评估依据是搜索服务返回的摘要，完整材料应打开原文核对。检索相关性低、广告多、型号不明时应弃权。
-- 不缓存用户输入或判断记录。并发限制是每个运行实例的尽力限制，不是可用于公开生产服务的持久化限流。
+| 变量 | 用途 |
+| --- | --- |
+| `SETTINGS_COOKIE_SECRET` | 必需的 Cookie 加密密钥；随机 32 字节的 base64url 字符串，需保持稳定 |
+| `OPENAI_BASE_URL` | 服务端默认模型接口地址，默认 `https://api.openai.com/v1` |
+| `OPENAI_MODEL` | 可选的服务端默认模型 ID |
+| `OPENAI_API_KEY` | 可选的服务端默认模型 Key；客户自带 Key 时无需配置 |
+| `OPENAI_JSON_MODE` | 默认开启；不支持 `response_format` 的兼容接口可设为 `false` |
+| `OPENAI_ALLOWED_HOSTS` | 允许客户填写的额外模型接口域名，以逗号分隔 |
+| `TAVILY_API_KEY` | 可选的服务端搜索 Key；也可由客户在页面填写 |
+| `SEARXNG_URL` | 自建搜索接口的完整 `/search` 地址 |
+| `SEARXNG_FALLBACK_URLS` | 备用搜索地址，逗号分隔，最多使用两个备用地址 |
+| `LAYA_BASE_URL` | 可选的自托管 Laya 地址，未设置即关闭 |
+| `LAYA_API_KEY` | 可选的 Laya 服务鉴权 Key |
 
-百分比是 **AI 主观风险估计**，未经消费案例校准，不能理解为真实统计概率或产品质量鉴定。Laya 同样没有在此业务领域微调或校准。
+页面输入的自定义模型域名必须加入 `OPENAI_ALLOWED_HOSTS`；服务端配置的 `OPENAI_BASE_URL` 自动受信任。切换服务商时，已保存的模型 Key 不会被转发到新的接口。
 
-## 可选 Laya 辅助判断
+## Cloudflare 部署
 
-根据 [Laya 官方 README](https://github.com/NandhaKishorM/laya) 的 HTTP 协议接入 `POST /v1/systemone`，使用 `multilingual` 模型和 `noul` 类型问题。
+部署使用 [Cloudflare 官方 cf CLI](https://github.com/cloudflare/cf)。需要具有 Workers 和 D1 权限的 Cloudflare 账号。
+
+```bash
+npm install -g cf
+cf auth login
+cf auth whoami
+```
+
+### 在自己的账号中首次部署
+
+1. 创建自己的 D1 数据库：
+
+   ```bash
+   cf d1 create --name my-iq-tax-db --primary-location-hint apac
+   ```
+
+2. 修改 `cloudflare.deploy.json`：将 `env.DB.name` 和 `env.DB.id` 替换为新数据库名称及返回的 `uuid`；`name` 是要创建的 Worker 名称。
+
+   `env.DB` 字段示例：
+
+   ```json
+   {
+     "type": "d1",
+     "name": "my-iq-tax-db",
+     "id": "创建数据库时返回的 UUID"
+   }
+   ```
+
+   仓库内的现有数据库 ID 属于在线实例，自行部署时应替换。默认搜索地址可能被拒绝或限流，可以替换为自己的搜索服务，或删除 `SEARXNG_URL` / `SEARXNG_FALLBACK_URLS` 字段，让客户填写 Tavily Key。保留 `SETTINGS_COOKIE_SECRET` 的 `secret` 声明，不在 JSON 中填入真实密钥。
+
+3. 创建并发布 Worker：
+
+   ```bash
+   npm run deploy:cf -- --init-cookie-secret
+   ```
+
+首次部署脚本会生成随机 Cookie 加密密钥，上传到 Cloudflare Secret，并删除权限为 `0600` 的临时文件。脚本先应用 `drizzle/` 中的 D1 迁移，再使用 `cf deploy --prebuilt` 发布，终端会返回 `workers.dev` 地址。
+
+### 更新已有实例
+
+```bash
+npm run deploy:cf
+```
+
+后续部署保留已有 Cookie 加密密钥，自动应用新增数据库迁移。迁移失败会停止发布。首次初始化选项只适用于尚未创建的 Worker，避免覆盖既有配置。
+
+本仓库保留原 Sites 构建集成，`.openai/hosting.json` 是原 Sites 项目的身份配置。Cloudflare 与 Sites 独立发布，推送 GitHub 不会自动更新任何线上实例。
+
+## 数据保存与隐私
+
+### 客户 API Key
+
+客户的模型 Key、Tavily Key、接口地址和模型 ID 保存在其浏览器的加密 Cookie 中，服务器不将客户密钥持久化到数据库、业务文件或判断记录。
+
+- AES-256-GCM 加密，每次保存使用随机 IV 和认证标签。
+- Cookie 为 host-only，限定 `Path=/api`，带 `HttpOnly`、`SameSite=Strict`，HTTPS 下带 `Secure`，有效期 30 天。
+- 页面恢复接口只返回接口地址、模型和密钥是否存在，不返回密钥明文。
+- 密钥留空会保留同一接口的原值，彻底删除使用“清除已保存配置”。
+
+后端必须在请求期间解密并使用密钥，因此密钥会经过部署者的服务器；请使用可信的实例。`SETTINGS_COOKIE_SECRET` 是部署者的应用加密密钥，保存在 Cloudflare Secret 中；它与客户的 API Key 不同。轮换它会使原 Cookie 失效。
+
+### 公开产品搜索记录
+
+提交判断的产品名称会公开展示，首页输入框旁已注明，请只填写产品信息。D1 仅保存：
+
+| 字段 | 内容 |
+| --- | --- |
+| `id` | 内部记录 ID |
+| `product_key` | 标准化产品名称，用于合并重复搜索 |
+| `product` | 展示用产品名称 |
+| `search_count` | 提交次数 |
+| `first_searched_at` | 首次提交时间 |
+| `last_searched_at` | 最近提交时间 |
+
+名称按 Unicode NFKC、空白和英文大小写合并，计数采用原子 upsert。页面每页 20 条，按最近搜索排序，时间按北京时间显示。
+
+只记录通过输入和模型配置校验后提交的判断；上游搜索或模型失败也计为一次提交。配置错误和设置弹窗中的搜索连接测试不计入。没有保存客户身份、IP、API Key、模型配置、完整请求或判断结果。记录从功能上线后开始积累，之前未保存的数据无法恢复。
+
+## 判断流程与边界
+
+```text
+产品名称 → 联网搜索 → 去重和相关性筛选 → 可选 Laya 辅助 → LLM 判断 → 结构与引用校验 → 展示结果
+```
+
+搜索优先使用客户 Tavily Key，其次为服务端 Tavily Key，再尝试 SearXNG 主接口及备用接口。最多合并 12 条相关来源摘要，不抓取来源网页全文。
+
+模型结合功效证据、价格价值和使用场景进行判断。返回结构、分数范围及引用编号均经过校验；至少引用两个不同域名、每条理由都有引用，才允许显示分数。这些规则能减少部分错误，但不保证不同域名的资料独立或真实。
+
+模型格式错误时最多纠正一次，复用原始检索资料，不重新搜索。兼容数字字符串、明确的中文证据等级和来源编号字符串，不推测缺失的分数或编造引用。官方 DeepSeek 接口的 `deepseek-flash` / `deepseek-v4-pro` 已有专用参数适配，其他接口按通用协议调用。
+
+## 可选 Laya 接入
+
+本项目适配 [Laya 自托管 HTTP 服务](https://github.com/NandhaKishorM/laya)，通过 `POST /v1/systemone` 请求 `multilingual` 模型。当前在线实例没有部署或启用 Laya。
+
+在能够运行 Python 模型的机器上启动服务，例如：
 
 ```bash
 python3 -m venv .venv-laya
@@ -53,61 +211,61 @@ python3 -m venv .venv-laya
 LAYA_HOST=127.0.0.1 LAYA_PORT=8000 LAYA_DEVICE=cpu LAYA_MODELS=multilingual LAYA_PRELOAD=1 .venv-laya/bin/laya-serve
 ```
 
-再设置应用环境变量：
+本地应用设置 `LAYA_BASE_URL=http://127.0.0.1:8000`。云端 Worker 需要可访问的 HTTPS Laya 地址；若服务启用鉴权，两端配置对应的 `LAYA_API_KEY`。
 
-```dotenv
-LAYA_BASE_URL=http://127.0.0.1:8000
-# 如果 Laya 配置了鉴权，则两端填相同的密钥
-LAYA_API_KEY=
-```
+Laya 会下载模型权重并消耗内存，不能直接在当前 Worker 中运行。它只提供辅助信号，不与最终百分比机械加权；超时或故障会降级并在结果中说明。Laya 没有针对本项目的消费判断业务进行校准。
 
-Laya 会下载模型权重，消耗额外内存。默认不安装/启用 Laya，LLM 可以独立运行；其辅助输出传给 LLM 作参考，不与最终分数机械加权。Laya 超时或故障会降级并在结果中说明。云端应用不能访问你电脑的 localhost，需要部署可达的 HTTPS Laya 服务并启用鉴权。
-
-## 验证与构建
+## 开发与验证
 
 ```bash
-npm run check
-npm test
-npm run build
-npm start
+npm run check       # TypeScript 检查
+npm test            # 自动化测试
+npm run build       # Vinext 构建
+npm run build:cf    # 构建并生成 cf Build Output
+npm run db:generate # 修改 db/schema.ts 后生成数据库迁移
+npm run db:migrate:local # 应用本地 D1 迁移
 ```
 
-测试使用明确的模拟上游，覆盖密钥隔离、搜索失败、证据不足、非法引用、无结果、输出截断、Laya 降级和完整分析链路。真实搜索已单独连通验证；真实 LLM 调用需要你自己的 Key。
+当前有 41 项测试，覆盖模型密钥隔离、搜索备用服务、模型输出校验、引用约束、Laya 降级、Cookie 加密，以及 D1 计数、筛选和分页。测试使用模拟上游与 SQLite，不消耗真实模型账户额度。已有线上验证覆盖 Cookie 保存与刷新恢复、重新部署后的恢复、D1 记录合并及手机布局。
 
-技术栈：React 19、TypeScript、Vinext/Vite、Cloudflare Workers 运行时、Zod。保留 Sites 的构建集成，因此可在 Sites 中私有部署；所有外部请求通过 HTTP 完成。
+```text
+app/                   首页、公开记录页和 API 路由
+lib/analysis.ts        搜索、LLM、Laya 和结果校验
+lib/settings-cookie.ts Cookie 加密、恢复与密钥隔离
+lib/search-history.ts  D1 记录与分页查询
+db/schema.ts           数据库表结构
+drizzle/               SQL 迁移及元数据
+scripts/               构建、部署和开发辅助脚本
+cloudflare.deploy.json Cloudflare Worker 与 D1 配置
+tests/                 自动化测试和本地夹具
+```
 
-## 部署配置
+## 常见问题
 
-本项目 `.openai/hosting.json` 绑定当前 Sites 项目。生产环境变量需要配置在 Sites 中，**不会自动读取本机 `.env.local`**。默认部署为仅本人可访问，不会开放你的服务端密钥给陌生人。修改环境变量后需重新部署才能生效。如需迁移给其他服务器或公开发布，应另行配置 HTTPS、身份访问和持久化限流。
+**联网搜索返回 403 / 429**
 
-参考 [OpenAI JSON mode 文档](https://developers.openai.com/api/docs/guides/structured-outputs#json-mode)、[Tavily Search 文档](https://docs.tavily.com/documentation/api-reference/endpoint/search)。
+通常是搜索服务拒绝云端访问、限流或额度不足，与模型 Key 无关。请填写可用的 Tavily Key，或更换自己的 SearXNG 地址。默认免费搜索服务的可用性不保证。“测试联网搜索”不会调用 LLM。
 
-浏览器 QA 使用本地 `tests/fixture-server.mjs`，明确标注夹具数据，验证成功评分、证据不足和设置弹窗；不将测试分数作为真实产品判断。390px 手机和 1440px 桌面布局均无横向溢出。当前 Ego Lite 截图接口超时，未完成截图视觉核验。
+**模型返回格式不完整**
 
-## 搜索连接排查
+核对模型 ID 和兼容接口是否支持 JSON mode。不支持时将服务端 `OPENAI_JSON_MODE` 设为 `false`，应用仍会严格验证 JSON；自动纠正后仍失败会提示具体字段。
 
-设置弹窗中的“测试联网搜索”通过 `POST /api/search` 实际检索当前产品，不调用 LLM、无需模型 API Key。Tavily 的密钥错误与 SearXNG 的云端访问拒绝分别显示。
+**刷新后没有恢复设置**
 
-当前云端通过 Jina Reader 的 HTTPS 读取接口获取现有匿名 SearXNG 的结果，避免云端直接连接 HTTP 非标准端口的问题；本地开发仍可直接使用自建服务。搜索服务和 Reader 会收到产品检索词，不转发模型密钥；两者可能限流或暂时不可用。可替换为自己的 HTTPS SearXNG 实例，或填写 Tavily Key。
+确认已点击“保存设置”、浏览器允许 Cookie，并且服务器已配置稳定的 `SETTINGS_COOKIE_SECRET`。更换域名、浏览器、设备或 Cookie 密钥后需要重新保存。
 
-SearXNG 地址可附带 `?format=html`，读取公开搜索结果卡片；默认仍为 JSON。只提取结果标题、链接和摘要，不执行页面脚本，遇到拒绝或验证页面不会尝试绕过。
+**公开记录页为空或读取失败**
 
-Reader 格式为 `https://r.jina.ai/http://你的公开匿名SearXNG/search`；只用于无需凭据的公开搜索地址，不应把含密钥或私有服务的地址发送给 Reader。
+空列表表示还没有符合条件的提交。读取失败时检查 Worker 的 `DB` 绑定、数据库 ID 和 SQL 迁移是否应用。本地数据库与线上数据库分别维护。
 
-## DeepSeek 与模型输出兼容
+**用于公网运营前还需要什么**
 
-官方 DeepSeek 接口的 `deepseek-flash` / `deepseek-v4-pro` 使用 `thinking: { type: "disabled" }` 和 `max_tokens: 4096`，明确提供完整 JSON 示例。模型 ID 保持用户配置；其他兼容服务商不会收到 DeepSeek 专用参数。
+当前并发限制为单实例的尽力限制，尚无账户系统、持久化访客限流或记录审核后台。扩大访问量前应根据实际运营需求补齐这些能力。依赖的搜索和模型服务按各自账户政策计费。
 
-服务端兼容数字字符串（如 `"78%"`）、字符串来源编号和明确的中文证据等级；缺失的产品名使用用户原始输入，空的购买建议/局限说明使用通用提示。不会推测缺失分数、把 0–1 小数擅自换算成百分比、编造产品事实或补造引用。未知证据等级、非法分数与不存在的引用仍拒绝通过。
+## 参考资料
 
-格式校验失败时最多重新请求模型一次，复用原始检索资料，不重新搜索、不发送隐藏推理或错误草稿。纠正仍失败时，错误消息会指出未通过校验的字段，例如 `probability` 或 `reasons.0.sourceIds`。拒答和鉴权错误不会触发格式纠正。
-
-DeepSeek 接口参数依据 [官方 JSON Output 文档](https://api-docs.deepseek.com/guides/json_mode/) 与 [Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion/)。兼容与重试通过模拟上游测试；真实账号仍需在页面配置自己的密钥。
-
-## 浏览器 Cookie 持久化
-
-客户配置以 AES-256-GCM 加密，使用随机 IV 和认证标签。Cookie 是 host-only，限定 `Path=/api`，带 `HttpOnly`、`SameSite=Strict`；HTTPS 下带 `Secure`，有效期 30 天。服务端只在请求期间解密，GET `/api/settings` 只返回接口、模型和“是否已有密钥”，不会返回密钥。POST 保存/更新，DELETE 清除；跨站修改会被拒绝。
-
-部署者需配置稳定的 `SETTINGS_COOKIE_SECRET`，值为随机 32 字节的 base64url 字符串，保存在服务端秘密环境变量中。这是应用的 Cookie 加密密钥，不是客户的模型 Key；轮换它会使已有 Cookie 失效。本机开发配置和当前 Sites 运行环境已经配置。迁移到新服务器时需自行配置并保持稳定，切勿提交真实值。
-
-已保存的模型 Key 绑定原接口地址；切换接口时需填写新的 Key，应用不会把已保存的 Key 转发到另一个服务商。留空的密钥字段保留原值，彻底删除使用“清除已保存配置”。其他浏览器或设备有各自独立的 Cookie，需要分别配置。浏览器阻止 Cookie 时保存操作会报告失败。
+- [Cloudflare cf CLI](https://github.com/cloudflare/cf)
+- [Cloudflare D1 Workers Binding API](https://developers.cloudflare.com/d1/worker-api/)
+- [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search)
+- [DeepSeek Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)
+- [Laya 项目](https://github.com/NandhaKishorM/laya)

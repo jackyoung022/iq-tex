@@ -1,0 +1,15 @@
+{
+  "name": "iq-tax-check",
+  "compatibilityDate": "2026-05-15",
+  "compatibilityFlags": ["nodejs_compat"],
+  "workersDev": true,
+  "previewUrls": false,
+  "assets": { "runWorkerFirst": ["/api/*"] },
+  "env": {
+    "DB": { "type": "d1", "name": "iq-tax-search-history", "id": "f80a8046-181b-4ebb-8b47-ebe88fdb1427" },
+    "SEARXNG_URL": { "type": "text", "value": "http://8.222.145.63:18080/search" },
+    "SEARXNG_FALLBACK_URLS": { "type": "text", "value": "https://r.jina.ai/http://8.222.145.63:18080/search" },
+    "SETTINGS_COOKIE_SECRET": { "type": "secret" }
+  },
+  "observability": { "enabled": false }
+}

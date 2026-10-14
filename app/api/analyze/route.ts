@@ -1,6 +1,8 @@
-import { analyze, AppError, type Settings } from '@/lib/analysis';
+import { analyze, AppError, resolveLLM, type Settings } from '@/lib/analysis';
 import { z } from 'zod';
 import { mergeSettings, readSettings } from '@/lib/settings-cookie';
+import { getHistoryDb } from '@/db';
+import { recordPublicSearch } from '@/lib/search-history';
 const schema = z.object({ product: z.string().trim().min(2).max(120), settings: z.object({ baseUrl: z.string().max(300).optional(), model: z.string().max(120).optional(), apiKey: z.string().max(512).optional(), tavilyKey: z.string().max(512).optional() }).optional() });
 const active = new Map<string, number>();
 export async function POST(request: Request) {
@@ -20,7 +22,13 @@ export async function POST(request: Request) {
     if (active.has(visitor)) throw new AppError('BUSY', '已有判断正在进行，请稍后重试。', 429);
     active.set(visitor, now);
     try {
-      return Response.json(await analyze(data.data.product, mergeSettings((data.data.settings || {}) as Settings, await readSettings(request, process.env), process.env), process.env), { headers });
+      const settings = mergeSettings((data.data.settings || {}) as Settings, await readSettings(request, process.env), process.env);
+      resolveLLM(settings, process.env); // Invalid configuration does not count as a search.
+      const db = getHistoryDb();
+      const recorded = await recordPublicSearch(db, data.data.product);
+      const result = await analyze(data.data.product, settings, process.env);
+      if (db && !recorded) result.warnings.push('本次判断已完成，但公开搜索记录保存失败。');
+      return Response.json(result, { headers });
     } finally { active.delete(visitor); }
   } catch (e) {
     if (e instanceof AppError) return Response.json({ error: e.message, code: e.code }, { status: e.status, headers });
