@@ -93,3 +93,13 @@ npm start
 SearXNG 地址可附带 `?format=html`，读取公开搜索结果卡片；默认仍为 JSON。只提取结果标题、链接和摘要，不执行页面脚本，遇到拒绝或验证页面不会尝试绕过。
 
 Reader 格式为 `https://r.jina.ai/http://你的公开匿名SearXNG/search`；只用于无需凭据的公开搜索地址，不应把含密钥或私有服务的地址发送给 Reader。
+
+## DeepSeek 与模型输出兼容
+
+官方 DeepSeek 接口的 `deepseek-flash` / `deepseek-v4-pro` 使用 `thinking: { type: "disabled" }` 和 `max_tokens: 4096`，明确提供完整 JSON 示例。模型 ID 保持用户配置；其他兼容服务商不会收到 DeepSeek 专用参数。
+
+服务端兼容数字字符串（如 `"78%"`）、字符串来源编号和明确的中文证据等级；缺失的产品名使用用户原始输入，空的购买建议/局限说明使用通用提示。不会推测缺失分数、把 0–1 小数擅自换算成百分比、编造产品事实或补造引用。未知证据等级、非法分数与不存在的引用仍拒绝通过。
+
+格式校验失败时最多重新请求模型一次，复用原始检索资料，不重新搜索、不发送隐藏推理或错误草稿。纠正仍失败时，错误消息会指出未通过校验的字段，例如 `probability` 或 `reasons.0.sourceIds`。拒答和鉴权错误不会触发格式纠正。
+
+DeepSeek 接口参数依据 [官方 JSON Output 文档](https://api-docs.deepseek.com/guides/json_mode/) 与 [Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion/)。兼容与重试通过模拟上游测试；真实账号仍需在页面配置自己的密钥。

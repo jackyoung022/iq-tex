@@ -25,8 +25,8 @@ test('search results discard unsafe links and deduplicate fragment URLs', () => 
 });
 test('fabricated citations and out-of-range model scores are rejected', () => {
   assert.throws(() => validateJudgment({ ...valid, reasons: [{ ...valid.reasons[0], sourceIds: [99] }] }, sources), /来源/);
-  assert.throws(() => validateJudgment({ ...valid, probability: 120 }, sources), /格式/);
-  assert.throws(() => validateJudgment({ ...valid, probability: '78' }, sources), /格式/);
+  assert.throws(() => validateJudgment({ ...valid, probability: 120 }, sources), /校验/);
+  assert.throws(() => validateJudgment({ ...valid, probability: '78/100' }, sources), /校验/);
 });
 test('insufficient evidence and single-domain citations cannot produce a score', () => {
   assert.equal(validateJudgment({ ...valid, evidence: 'insufficient' }, sources).probability, null);
@@ -160,4 +160,79 @@ test('HTTPS Reader unwraps anonymous SearXNG JSON without forwarding any secrets
 
 test('a failed free backup cannot hide invalid Tavily credentials', async () => {
   await assert.rejects(searchProduct('测试产品', { tavilyKey: 'invalid' }, env, async url => new Response('', {status: String(url).includes('tavily') ? 401 : 429})), /Tavily 搜索密钥/);
+});
+
+test('compatible string fields, Chinese evidence and empty display metadata are normalized', () => {
+  const result = validateJudgment({ ...valid, product: undefined, evidence: '证据有限', probability: '78%', uncertainty: null, advice: '', reasons: [{ ...valid.reasons[0], sourceIds: ['1', '[2]'] }] }, sources, '测试产品');
+  assert.equal(result.probability, 78);
+  assert.equal(result.evidence, 'limited');
+  assert.equal(result.product, '测试产品');
+  assert.deepEqual(result.reasons[0].sourceIds, [1, 2]);
+  assert.ok(result.uncertainty.length > 0);
+});
+test('normalization never invents probability, evidence or source references', () => {
+  for (const probability of ['0.78', '105%', '高风险', -1, 1.5]) assert.throws(() => validateJudgment({ ...valid, probability }, sources), /校验/);
+  assert.throws(() => validateJudgment({ ...valid, evidence: undefined }, sources), /evidence/);
+  assert.throws(() => validateJudgment({ ...valid, reasons: [{ ...valid.reasons[0], sourceIds: ['99'] }] }, sources), /来源/);
+  assert.equal(validateJudgment({ ...valid, evidence:'insufficient', probability:undefined }, sources).probability, null);
+});
+test('DeepSeek flash uses the documented JSON example and non-thinking request without changing the model', async () => {
+  const result = await analyze('测试产品', {baseUrl:'https://api.deepseek.com/v1',model:'deepseek-flash',apiKey:'test-deepseek-key'}, env, async (url, init) => {
+    if (String(url).includes('/search')) return ok({results:rows});
+    const payload = JSON.parse(String(init?.body));
+    assert.equal(payload.model, 'deepseek-flash');
+    assert.deepEqual(payload.thinking, {type:'disabled'});
+    assert.equal(payload.max_tokens, 4096);
+    assert.deepEqual(payload.response_format, {type:'json_object'});
+    assert.ok(payload.messages[0].content.includes('"sourceIds":[]'));
+    return ok({choices:[{finish_reason:'stop',message:{reasoning_content:'private chain must stay hidden',content:JSON.stringify({...valid,probability:'78',uncertainty:null})}}]});
+  });
+  assert.equal(result.probability, 78);
+  assert.ok(!JSON.stringify(result).includes('private chain'));
+});
+test('invalid first judgment is regenerated once using the same search results and reports repair', async () => {
+  let modelCalls=0,searchCalls=0;
+  const result=await analyze('测试产品', {}, env, async (url,init)=>{
+    if(String(url).includes('/search')) {searchCalls++;return ok({results:rows});}
+    modelCalls++;
+    const payload=JSON.parse(String(init?.body));
+    if(modelCalls===2){assert.equal(payload.messages.length,3);assert.ok(payload.messages[2].content.includes('evidence'));}
+    return ok({choices:[{finish_reason:'stop',message:{content:JSON.stringify(modelCalls===1?{...valid,evidence:'unknown'}:valid)}}]});
+  });
+  assert.equal(searchCalls,2);
+  assert.equal(modelCalls,2);
+  assert.equal(result.probability,78);
+  assert.ok(result.warnings[0].includes('自动纠正'));
+});
+test('empty DeepSeek content can be regenerated but repeated invalid citations still fail', async () => {
+  let calls=0;
+  const result=await analyze('测试产品',{},env,async url=>{
+    if(String(url).includes('/search')) return ok({results:rows});
+    return ok({choices:[{finish_reason:'stop',message:{content:++calls===1?'':JSON.stringify(valid)}}]});
+  });
+  assert.equal(result.probability,78);
+  calls=0;
+  await assert.rejects(analyze('测试产品',{},env,async url=>{
+    if(String(url).includes('/search')) return ok({results:rows});
+    calls++;return ok({choices:[{finish_reason:'stop',message:{content:JSON.stringify({...valid,reasons:[{...valid.reasons[0],sourceIds:[99]}]})}}]});
+  }),/来源/);
+  assert.equal(calls,2);
+});
+test('persistent schema errors expose safe field names and never loop or re-run search',async()=>{
+  let calls=0;
+  await assert.rejects(analyze('测试产品',{},env,async url=>{
+    if(String(url).includes('/search')) return ok({results:rows});
+    calls++;return ok({choices:[{finish_reason:'stop',message:{content:JSON.stringify({...valid,probability:'secret-debug-text'})}}]});
+  }),e=> e instanceof Error && /probability/.test(e.message) && !e.message.includes('secret-debug-text'));
+  assert.equal(calls,2);
+});
+test('refusals are respected and generic providers do not receive DeepSeek-only parameters',async()=>{
+  let calls=0;
+  await assert.rejects(analyze('测试产品',{},env,async(url,init)=>{
+    if(String(url).includes('/search'))return ok({results:rows});
+    calls++;
+    const payload=JSON.parse(String(init?.body));assert.equal(payload.thinking,undefined);
+    return ok({choices:[{finish_reason:'content_filter',message:{content:null,refusal:'refusal'}}]});
+  }),/未能回答/);
+  assert.equal(calls,1);
 });
