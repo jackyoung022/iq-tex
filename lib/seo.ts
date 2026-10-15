@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 // Keep canonical URLs, the sitemap and structured data on the same public origin.
-export const siteOrigin = 'https://iq-tax-check.jackyra.workers.dev';
+export const siteOrigin = 'https://iq-tex.jackyra.com';
 export const siteName = '智商税';
 export const publicPages = [
   { path: '/', title: '智商税判断工具｜AI 产品分析与理性消费助手', description: '输入产品名称，联网核对功效、价格与公开评测，用 AI 综合分析智商税风险，查看判断理由、购买建议和资料来源。支持手机、电脑及自带模型 API Key。' },

@@ -2,7 +2,7 @@
 
 一个适配电脑和手机的 AI 消费判断工具。输入产品名称，应用先联网搜索公开资料，再通过 OpenAI 兼容接口调用大模型，给出智商税风险估计、判断理由、购买建议和资料来源。证据不足时显示“暂无法判断”。
 
-[在线体验](https://iq-tax-check.jackyra.workers.dev/) · [大家搜过什么](https://iq-tax-check.jackyra.workers.dev/history)
+[在线体验](https://iq-tex.jackyra.com/) · [大家搜过什么](https://iq-tex.jackyra.com/history)
 
 > 百分比是 AI 对风险的主观估计，未经真实消费案例校准。它不等于统计概率、检测报告或产品质量鉴定，判断可能受到资料、型号、价格和个人需求的影响。
 
@@ -247,9 +247,9 @@ tests/                 自动化测试和本地夹具
 
 站点已配置首页及公开记录页的独立标题、描述、canonical、Open Graph、WebSite / WebPage 结构化数据；公开记录的首屏由服务端输出 HTML，不依赖搜索引擎执行 JavaScript。`/robots.txt` 允许抓取公开页面与渲染资源，声明 `/sitemap.xml`，API 路径禁止抓取并返回 `X-Robots-Tag: noindex, nofollow`。站点地图只包含首页及 `/history`，不包含 API 或带产品参数的重复链接。
 
-维护者可在 [Google Search Console](https://search.google.com/search-console) 中添加 **URL 前缀** `https://iq-tax-check.jackyra.workers.dev/`，选择 HTML 标记验证。将标记中的 `content` 值加入 `cloudflare.deploy.json` 的 `env`：`"GOOGLE_SITE_VERIFICATION": { "type": "text", "value": "你的验证值" }`，运行 `npm run deploy:cf` 后，再回到 Search Console 点击“验证”。该验证值是公开的网站所有权标记，不是 Google 密码或 API Key。
+维护者可在 [Google Search Console](https://search.google.com/search-console) 中添加 **URL 前缀** `https://iq-tex.jackyra.com/`，选择 HTML 标记验证。将标记中的 `content` 值加入 `cloudflare.deploy.json` 的 `env`：`"GOOGLE_SITE_VERIFICATION": { "type": "text", "value": "你的验证值" }`，运行 `npm run deploy:cf` 后，再回到 Search Console 点击“验证”。该验证值是公开的网站所有权标记，不是 Google 密码或 API Key。若添加的是不带协议的“网域”资源，则使用 DNS 验证；已通过 DNS 或父网域验证时无需重复添加 HTML 标记。
 
-验证后，在“站点地图”提交 `https://iq-tax-check.jackyra.workers.dev/sitemap.xml`，并在“网址检查”中检查首页和 `/history`、按需请求编入索引。当前没有通过应用自动登录 Google 或提交收录；是否抓取、何时收录及排名由 Google 决定。更换域名时同步修改 `lib/seo.ts` 的 `siteOrigin`，重新部署后验证新网址。
+验证后，在“站点地图”提交 `https://iq-tex.jackyra.com/sitemap.xml`，并在“网址检查”中检查首页和 `/history`、按需请求编入索引。当前没有通过应用自动登录 Google 或提交收录；是否抓取、何时收录及排名由 Google 决定。更换域名时同步修改 `lib/seo.ts` 的 `siteOrigin`，重新部署后验证新网址。
 
 **联网搜索返回 403 / 429**
 
