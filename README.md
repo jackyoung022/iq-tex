@@ -104,6 +104,7 @@ npm run dev
 | `SEARXNG_FALLBACK_URLS` | 备用搜索地址，逗号分隔，最多使用两个备用地址 |
 | `LAYA_BASE_URL` | 可选的自托管 Laya 地址，未设置即关闭 |
 | `LAYA_API_KEY` | 可选的 Laya 服务鉴权 Key |
+| `GOOGLE_SITE_VERIFICATION` | 可选的 Google Search Console HTML 标记验证值，仅填 `content` 的值 |
 
 页面输入的自定义模型域名必须加入 `OPENAI_ALLOWED_HOSTS`；服务端配置的 `OPENAI_BASE_URL` 自动受信任。切换服务商时，已保存的模型 Key 不会被转发到新的接口。
 
@@ -226,7 +227,7 @@ npm run db:generate # 修改 db/schema.ts 后生成数据库迁移
 npm run db:migrate:local # 应用本地 D1 迁移
 ```
 
-当前有 41 项测试，覆盖模型密钥隔离、搜索备用服务、模型输出校验、引用约束、Laya 降级、Cookie 加密，以及 D1 计数、筛选和分页。测试使用模拟上游与 SQLite，不消耗真实模型账户额度。已有线上验证覆盖 Cookie 保存与刷新恢复、重新部署后的恢复、D1 记录合并及手机布局。
+当前有 44 项测试，覆盖模型密钥隔离、搜索备用服务、模型输出校验、引用约束、Laya 降级、Cookie 加密、D1 计数、筛选和分页，以及 SEO 规范网址、抓取规则和结构化数据。测试使用模拟上游与 SQLite，不消耗真实模型账户额度。已有线上验证覆盖 Cookie 保存与刷新恢复、重新部署后的恢复、D1 记录合并及手机布局。
 
 ```text
 app/                   首页、公开记录页和 API 路由
@@ -241,6 +242,14 @@ tests/                 自动化测试和本地夹具
 ```
 
 ## 常见问题
+
+### SEO 与 Google 收录
+
+站点已配置首页及公开记录页的独立标题、描述、canonical、Open Graph、WebSite / WebPage 结构化数据；公开记录的首屏由服务端输出 HTML，不依赖搜索引擎执行 JavaScript。`/robots.txt` 允许抓取公开页面与渲染资源，声明 `/sitemap.xml`，API 路径禁止抓取并返回 `X-Robots-Tag: noindex, nofollow`。站点地图只包含首页及 `/history`，不包含 API 或带产品参数的重复链接。
+
+维护者可在 [Google Search Console](https://search.google.com/search-console) 中添加 **URL 前缀** `https://iq-tax-check.jackyra.workers.dev/`，选择 HTML 标记验证。将标记中的 `content` 值加入 `cloudflare.deploy.json` 的 `env`：`"GOOGLE_SITE_VERIFICATION": { "type": "text", "value": "你的验证值" }`，运行 `npm run deploy:cf` 后，再回到 Search Console 点击“验证”。该验证值是公开的网站所有权标记，不是 Google 密码或 API Key。
+
+验证后，在“站点地图”提交 `https://iq-tax-check.jackyra.workers.dev/sitemap.xml`，并在“网址检查”中检查首页和 `/history`、按需请求编入索引。当前没有通过应用自动登录 Google 或提交收录；是否抓取、何时收录及排名由 Google 决定。更换域名时同步修改 `lib/seo.ts` 的 `siteOrigin`，重新部署后验证新网址。
 
 **联网搜索返回 403 / 429**
 

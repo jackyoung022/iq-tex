@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowUpRight, ArrowRight, Check, ChevronDown, CircleHelp, ExternalLink, History, LoaderCircle, Search, Settings2, ShieldCheck, Sparkles, X } from 'lucide-react';
 import type { Analysis, Settings } from '@/lib/analysis';
+import { jsonLd, webpageSchema } from '@/lib/seo';
 
 type StoredSettings = { baseUrl: string; model: string; hasApiKey: boolean; hasTavilyKey: boolean };
 type Config = { llmConfigured: boolean; searchConfigured: boolean; baseUrl: string; model: string };
@@ -124,6 +125,7 @@ export default function Home() {
   const clear = () => { setProduct(''); setResult(null); setError(''); input.current?.focus(); };
 
   return <div className="app">
+    <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(webpageSchema(0)) }}/>
     <header className="site-header">
       <a className="brand" href="/" aria-label="智商税首页"><span className="brand-icon">¥<span>?</span></span><span>智商税<span className="brand-dot">.</span></span></a>
       <div className="header-actions"><a className="history-link" href="/history"><History size={16}/><span>大家搜过</span></a><button className="icon-button settings-button" onClick={openSettings} disabled={restoring || saving} aria-label="接口设置"><Settings2 size={18}/><span>设置</span></button></div>
@@ -163,6 +165,15 @@ export default function Home() {
       </section>
 
       <div className="under-panel"><span><ShieldCheck size={14}/>基于公开信息，保留独立判断</span><button onClick={() => methodDialog.current?.showModal()}>我们怎么判断？<ArrowUpRight size={14}/></button></div>
+      <section className="consumer-guide" aria-labelledby="consumer-guide-title">
+        <h2 id="consumer-guide-title">怎么判断一个产品是不是智商税？</h2>
+        <p>这款 AI 消费判断工具会联网核对产品功效、价格与公开评测，帮助你分清实际需求和宣传溢价。输入具体的品牌与型号，能让资料更贴近你准备购买的产品。</p>
+        <div className="consumer-guide-grid">
+          <div><h3>先核对证据</h3><p>比较宣传卖点、公开研究和评测来源。资料不足时显示“暂无法判断”，不强行给分。</p></div>
+          <div><h3>再考虑自己的需求</h3><p>高价格或品牌溢价本身不等于智商税，使用场景、替代品和个人偏好同样影响价值。</p></div>
+          <div><h3>保留独立判断</h3><p>百分比是 AI 的主观风险估计。购买前请打开原始资料核对，也可以<a href="/history">看看大家搜过的产品</a>。</p></div>
+        </div>
+      </section>
       <div className="philosophy"><span className="philosophy-line"/><p>少一点冲动，多一点清醒。</p><span className="philosophy-line"/></div>
     </main>
     <footer><span>智商税<span className="brand-dot">.</span> <span className="footer-separator">/</span> 为理性消费做一点小事</span><span>AI 判断仅供参考</span></footer>
